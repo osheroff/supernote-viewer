@@ -145,3 +145,48 @@ final class SupernoteKitTests: XCTestCase {
         XCTAssertEqual(doc.numberOfPages, 2)
     }
 }
+
+/// Measurement logic doesn't need the example files.
+final class MeasurementTests: XCTestCase {
+    func testParsesLengths() throws {
+        XCTAssertEqual(try XCTUnwrap(Length.parse("2,23 m")), 2.23, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Length.parse("2.23")), 2.23, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Length.parse("223 cm")), 2.23, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Length.parse("2230mm")), 2.23, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Length.parse(" 5 M ")), 5, accuracy: 1e-9)
+        XCTAssertNil(Length.parse(""))
+        XCTAssertNil(Length.parse("abc"))
+        XCTAssertNil(Length.parse("0 m"))
+        XCTAssertNil(Length.parse("-2 m"))
+    }
+
+    func testFormatsLengths() {
+        let de = Locale(identifier: "de_DE"), en = Locale(identifier: "en_US")
+        XCTAssertEqual(Length.format(3.4712, locale: de), "3,47 m")
+        XCTAssertEqual(Length.format(3.4712, locale: en), "3.47 m")
+        XCTAssertEqual(Length.format(0.345, locale: de), "34,5 cm")
+        XCTAssertEqual(Length.format(1234.5, locale: de), "1234,50 m")
+    }
+
+    func testScaleMath() throws {
+        var state = MeasureState()
+        let line = MeasureLine(pageIndex: 0, start: .zero, end: CGPoint(x: 150, y: 200))  // 250 pt
+        XCTAssertNil(state.meters(of: line))
+
+        state.calibrate(Calibration(pageIndex: 0, start: .zero, end: CGPoint(x: 100, y: 0), meters: 2))
+        XCTAssertEqual(try XCTUnwrap(state.meters(of: line)), 5, accuracy: 1e-9)
+
+        // Another page without its own calibration uses the latest one.
+        let other = MeasureLine(pageIndex: 3, start: .zero, end: CGPoint(x: 0, y: 50))
+        let scale = try XCTUnwrap(state.scale(forPage: 3))
+        XCTAssertEqual(scale.fromPage, 0)
+        XCTAssertEqual(try XCTUnwrap(state.meters(of: other)), 1, accuracy: 1e-9)
+
+        // Recalibrating a page replaces its calibration; removing it drops the scale.
+        state.calibrate(Calibration(pageIndex: 0, start: .zero, end: CGPoint(x: 100, y: 0), meters: 4))
+        XCTAssertEqual(state.calibrations.count, 1)
+        XCTAssertEqual(try XCTUnwrap(state.meters(of: line)), 10, accuracy: 1e-9)
+        state.remove(id: state.calibrations[0].id)
+        XCTAssertNil(state.scale(forPage: 0))
+    }
+}

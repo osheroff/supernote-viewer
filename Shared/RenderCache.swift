@@ -2,26 +2,13 @@ import AppKit
 import CryptoKit
 import SupernoteKit
 
-/// Renders Supernote files to PDFs in the app's cache and opens them in Preview.
+/// Renders Supernote files to PDFs in a cache shared by Supernote Viewer and Supernote Preview Bridge.
 @MainActor
-enum PreviewHandoff {
+enum RenderCache {
     static let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("dev.schaefer.SupernoteViewer", isDirectory: true)
     static let documentsDirectory = cacheRoot.appendingPathComponent("Documents", isDirectory: true)
     static let ocrDirectory = cacheRoot.appendingPathComponent("ocr", isDirectory: true)
-
-    static func open(_ urls: [URL]) async {
-        var pdfs: [URL] = []
-        for url in urls {
-            do {
-                pdfs.append(try await preparePDF(for: url))
-            } catch {
-                showError(error, for: url)
-            }
-        }
-        guard !pdfs.isEmpty else { return }
-        await openInPreview(pdfs)
-    }
 
     // MARK: - Cache
 
@@ -37,9 +24,7 @@ enum PreviewHandoff {
     /// Never overwrites a cached PDF the user modified; uses "Name 2.pdf" etc. instead.
     static func preparePDF(for source: URL) async throws -> URL {
         let fm = FileManager.default
-        let sourceAttributes = try fm.attributesOfItem(atPath: source.path)
-        let sourceModified = (sourceAttributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
-        let sourceSize = (sourceAttributes[.size] as? Int) ?? 0
+        let (sourceModified, sourceSize) = try signature(of: source)
 
         let folder = documentsDirectory.appendingPathComponent(shortHash(source.standardizedFileURL.path), isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -67,6 +52,21 @@ enum PreviewHandoff {
             return pdfURL
         }
         throw CocoaError(.fileWriteFileExists)
+    }
+
+    /// Modification time and size of a source file. For `.mark` files the companion PDF's
+    /// modification time counts too, so replacing the original PDF also refreshes the render.
+    nonisolated static func signature(of source: URL) throws -> (modified: Double, size: Int) {
+        let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
+        var modified = (attributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
+        let size = (attributes[.size] as? Int) ?? 0
+        if source.pathExtension.lowercased() == "mark" {
+            let companion = SNFile.companionPDFURL(forMark: source)
+            if let date = (try? FileManager.default.attributesOfItem(atPath: companion.path))?[.modificationDate] as? Date {
+                modified = max(modified, date.timeIntervalSinceReferenceDate)
+            }
+        }
+        return (modified, size)
     }
 
     /// `X.note` → "X", `X.pdf.mark` → "X (annotated)".
@@ -113,24 +113,7 @@ enum PreviewHandoff {
 
     // MARK: - Helpers
 
-    private static func openInPreview(_ pdfs: [URL]) async {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        guard let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
-            pdfs.forEach { NSWorkspace.shared.open($0) }
-            return
-        }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            NSWorkspace.shared.open(pdfs, withApplicationAt: preview, configuration: configuration) { _, error in
-                if let error {
-                    Task { @MainActor in showError(error, for: pdfs[0]) }
-                }
-                continuation.resume()
-            }
-        }
-    }
-
-    private static func showError(_ error: Error, for url: URL) {
+    static func showError(_ error: Error, for url: URL) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning

@@ -20,18 +20,17 @@ packages:
     path: SupernoteKit
 
 targets:
+  # Opens .note/.mark/.pdf in its own windows (thumbnails, live reload, measuring).
   SupernoteViewer:
     type: application
     platform: macOS
-    sources: [App]
+    sources: [Shared, Viewer]
     info:
-      path: App/Info.plist
+      path: Viewer/Info.plist
       properties:
         CFBundleDisplayName: Supernote Viewer
         LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
-        # No Dock icon: opening a file hands it straight to Preview.
-        LSUIElement: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Supernote Notebook
             CFBundleTypeRole: Viewer
@@ -41,7 +40,22 @@ targets:
             CFBundleTypeRole: Viewer
             LSHandlerRank: Owner
             LSItemContentTypes: [dev.schaefer.supernote.mark]
-        UTExportedTypeDeclarations:
+          # PDFs open here via Open With; Preview stays the default.
+          - CFBundleTypeName: PDF Document
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
+        NSServices:
+          - NSMenuItem:
+              default: Measure in Supernote Viewer
+            NSMessage: measureFiles
+            NSPortName: Supernote Viewer
+            NSRequiredContext: {}
+            NSSendFileTypes:
+              - dev.schaefer.supernote.note
+              - dev.schaefer.supernote.mark
+              - com.adobe.pdf
+        UTExportedTypeDeclarations: &supernoteTypes
           - UTTypeIdentifier: dev.schaefer.supernote.note
             UTTypeDescription: Supernote Notebook
             UTTypeConformsTo: [public.data, public.content]
@@ -62,6 +76,38 @@ targets:
       - target: QuickLookPreview
         embed: true
         codeSign: true
+
+  # Renders .note/.mark to PDF and hands it to Preview.app.
+  SupernotePreviewBridge:
+    type: application
+    platform: macOS
+    sources: [Shared, Bridge]
+    info:
+      path: Bridge/Info.plist
+      properties:
+        CFBundleDisplayName: Supernote Preview Bridge
+        LSApplicationCategoryType: public.app-category.productivity
+        NSPrincipalClass: NSApplication
+        # No Dock icon: opening a file hands it straight to Preview.
+        LSUIElement: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Supernote Notebook
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [dev.schaefer.supernote.note]
+          - CFBundleTypeName: Supernote PDF Annotations
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [dev.schaefer.supernote.mark]
+        # Supernote Viewer exports these types; importing keeps them defined without it.
+        UTImportedTypeDeclarations: *supernoteTypes
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.schaefer.SupernotePreviewBridge
+        PRODUCT_NAME: Supernote Preview Bridge
+    dependencies:
+      - package: SupernoteKit
+        product: SupernoteKit
 
   QuickLookPreview:
     type: app-extension

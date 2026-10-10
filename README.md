@@ -1,12 +1,19 @@
-# Supernote Viewer
+# Supernote Viewer & Supernote Preview Bridge
 
-Supernote files on macOS, the native way:
+Two macOS apps for Supernote files. Pick which one opens `.note` and `.pdf.mark` on double-click by changing the default app: in Finder, select a file → Get Info → Open with → choose the app → Change All… (once for a `.note`, once for a `.mark`).
 
-- **Double-click** a `.note` or `.pdf.mark` file and it opens in **Preview**. Handwriting is sharp vector at any zoom, and it is searchable and selectable through an invisible text layer from Apple's on-device recognizer (German + English).
-- **Press Space** in Finder for a Quick Look preview.
+- **Supernote Preview Bridge** renders the file to a PDF and opens it in **Preview**. Handwriting is sharp vector at any zoom, and it is searchable and selectable through an invisible text layer from Apple's on-device recognizer (German + English).
+- **Supernote Viewer** opens the file in its own window:
+  - **Thumbnails sidebar** (⌥⌘2).
+  - **Live reload:** the window updates by itself when your Supernote syncs a change.
+  - **Measuring:**
+    1. Choose **Calibrate** and drag along a known length, then type it in (e.g. `2,23 m`).
+    2. Choose **Measure** and drag to measure; hold ⇧ for straight lines; click a line and press ⌫ to delete it.
+    3. Use **Export PDF…** to save the measurements as standard PDF annotations.
 
-- `.note`: every page, including the template background and highlighter layers.
-- `X.pdf.mark`: the original `X.pdf` with your handwriting drawn on top. The PDF must sit next to the `.mark` file. If it's missing, the ink is shown on blank pages.
+    Calibrations and measurements are remembered per file.
+  - It also opens plain PDFs (Open With → Supernote Viewer) and provides the Finder action **"Measure in Supernote Viewer"** for `.note`, `.mark` and `.pdf`.
+- **Quick Look:** press Space in Finder for a preview, whichever app is the default.
 
 Preview opens a generated copy from `~/Library/Caches/dev.schaefer.SupernoteViewer/`.
 - The copy is regenerated when the notebook changes.
@@ -24,7 +31,7 @@ brew install xcodegen   # once
 ./install.sh
 ```
 
-This installs `~/Applications/Supernote Viewer.app`, which carries the Quick Look extension. If previews don't show up, open the app once. Then check that "Supernote Quick Look" is enabled under System Settings → General → Login Items & Extensions → Quick Look.
+This installs both apps to `~/Applications`. Supernote Viewer carries the Quick Look extension. If previews don't show up, open Supernote Viewer once. Then check that "Supernote Quick Look" is enabled under System Settings → General → Login Items & Extensions → Quick Look.
 
 ## Layout
 
@@ -32,7 +39,13 @@ This installs `~/Applications/Supernote Viewer.app`, which carries the Quick Loo
   - `swift test` runs the tests against `example_files/`.
   - `swift run -c release snrender <file> out.pdf [--png outdir] [--bitmap] [--ocr]` renders a file from the command line.
 - `QuickLookPreview/`: the Quick Look extension. It is data-based and returns a PDF built by `PDFRenderer`.
-- `App/`: the app. It declares the `.note` and `.mark` file types, renders opened files, and hands them to Preview.
+- `Shared/`: the render cache used by both apps (`~/Library/Caches/dev.schaefer.SupernoteViewer/`).
+- `Viewer/`: Supernote Viewer.
+  - Its PDFKit window has thumbnails, live reload and measuring.
+  - It exports the `.note` and `.mark` file types.
+- `Bridge/`: Supernote Preview Bridge.
+  - It hands rendered PDFs to Preview.
+  - It imports the file types, so it works on its own.
 - `project.yml`: the XcodeGen spec. The `.xcodeproj` is generated from it.
 
 ## Stroke data (`TOTALPATH`)
