@@ -29,6 +29,18 @@ targets:
       properties:
         CFBundleDisplayName: Supernote Viewer
         LSApplicationCategoryType: public.app-category.productivity
+        NSPrincipalClass: NSApplication
+        # No Dock icon: opening a file hands it straight to Preview.
+        LSUIElement: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Supernote Notebook
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [dev.schaefer.supernote.note]
+          - CFBundleTypeName: Supernote PDF Annotations
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [dev.schaefer.supernote.mark]
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: dev.schaefer.supernote.note
             UTTypeDescription: Supernote Notebook
@@ -45,6 +57,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.schaefer.SupernoteViewer
         PRODUCT_NAME: Supernote Viewer
     dependencies:
+      - package: SupernoteKit
+        product: SupernoteKit
       - target: QuickLookPreview
         embed: true
         codeSign: true

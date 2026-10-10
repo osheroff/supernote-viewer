@@ -2,29 +2,51 @@ import CoreGraphics
 import CoreText
 import Foundation
 
+/// Options for PDF rendering.
+public struct RenderOptions {
+    /// Draw handwriting as vector outlines from the stroke data (falls back to bitmaps per layer).
+    public var vector: Bool
+    /// Add an invisible text layer with recognized handwriting.
+    public var textLayer: Bool
+    /// Where recognized text is cached between renders.
+    public var ocrCacheDirectory: URL?
+    /// Called with handwriting recognition progress (pages done, total), from any thread.
+    public var progress: ((_ done: Int, _ total: Int) -> Void)?
+
+    public init(vector: Bool = true, textLayer: Bool = false, ocrCacheDirectory: URL? = nil,
+                progress: ((_ done: Int, _ total: Int) -> Void)? = nil) {
+        self.vector = vector
+        self.textLayer = textLayer
+        self.ocrCacheDirectory = ocrCacheDirectory
+        self.progress = progress
+    }
+}
+
 /// Renders Supernote files to PDF data.
 public enum PDFRenderer {
     /// Renders a `.note` or `.mark` file. For `.mark`, the companion PDF next to it is used when readable.
-    public static func render(contentsOf url: URL) throws -> Data {
+    public static func render(contentsOf url: URL, options: RenderOptions = RenderOptions()) throws -> Data {
         let file = try SNFile(url: url)
         switch file.fileType {
         case .note:
-            return try renderNote(file)
+            return try renderNote(file, options: options)
         case .mark:
             let pdfURL = SNFile.companionPDFURL(forMark: url)
-            return try renderMark(file, companion: openPDF(pdfURL), companionName: pdfURL.lastPathComponent)
+            return try renderMark(file, companion: openPDF(pdfURL), companionName: pdfURL.lastPathComponent,
+                                  options: options)
         }
     }
 
-    public static func renderNote(_ file: SNFile) throws -> Data {
-        try makePDF { ctx in
+    public static func renderNote(_ file: SNFile, options: RenderOptions = RenderOptions()) throws -> Data {
+        let words = recognizeIfNeeded(file, options)
+        return try makePDF { ctx in
             for page in file.pages {
                 let rect = CGRect(origin: .zero, size: pointSize(page.width, page.height))
                 beginPage(ctx, rect)
-                if let image = try LayerCompositor.render(page: page, in: file, background: .white) {
-                    ctx.interpolationQuality = .high
-                    ctx.draw(image, in: rect)
-                }
+                ctx.setFillColor(gray: 1, alpha: 1)
+                ctx.fill(rect)
+                try drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
+                if let w = words[page.number] { TextLayer.draw(w, in: ctx, rect: rect) }
                 ctx.endPDFPage()
             }
         }
@@ -33,9 +55,11 @@ public enum PDFRenderer {
     /// Draws each page of `companion` with the matching mark page's ink on top.
     /// Mark page n annotates PDF page n; the device shows the PDF page fitted and centered in its
     /// screen, so output pages have the device's aspect ratio to keep notes written in the margins.
-    public static func renderMark(_ file: SNFile, companion: CGPDFDocument?, companionName: String) throws -> Data {
+    public static func renderMark(_ file: SNFile, companion: CGPDFDocument?, companionName: String,
+                                  options: RenderOptions = RenderOptions()) throws -> Data {
         let marksByNumber = Dictionary(file.pages.map { ($0.number, $0) }, uniquingKeysWith: { a, _ in a })
         let highlights = MarkHighlight.load(from: file)
+        let words = recognizeIfNeeded(file, options)
         let pdfCount = companion?.numberOfPages ?? 0
         let pageCount = max(pdfCount, file.pages.map(\.number).max() ?? 0)
 
@@ -76,9 +100,9 @@ public enum PDFRenderer {
                     for h in highlights[number - 1] ?? [] { h.draw(in: ctx, pageRect: pageRect) }
                 }
 
-                if let mark, let ink = try LayerCompositor.render(page: mark, in: file, background: .transparent) {
-                    ctx.interpolationQuality = .high
-                    ctx.draw(ink, in: box)
+                if let mark {
+                    try drawInk(of: mark, in: file, ctx: ctx, rect: box, options: options)
+                    if let w = words[mark.number] { TextLayer.draw(w, in: ctx, rect: box) }
                 }
 
                 if companion == nil && number == 1 {
@@ -87,6 +111,40 @@ public enum PDFRenderer {
                 ctx.endPDFPage()
             }
         }
+    }
+
+    /// Draws a page's visible layers bottom-up into `rect`. Each handwriting layer is drawn as
+    /// vector outlines when the stroke data reproduces its bitmap, otherwise as the bitmap.
+    /// The template background is always a bitmap.
+    static func drawInk(of page: SNPage, in file: SNFile, ctx: CGContext, rect: CGRect, options: RenderOptions) throws {
+        let strokes = options.vector ? page.strokes(in: file) : nil
+
+        for layer in page.visibleLayers(fileType: file.fileType) {
+            if let strokes, let index = SNStroke.layerIndex(forLayerName: layer.name),
+               let codes = try LayerCompositor.codes(of: layer, page: page, in: file) {
+                let layerStrokes = strokes.filter { $0.layer == index }
+                if VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height) {
+                    ctx.saveGState()
+                    // Page pixels (origin top-left, y down) -> rect.
+                    ctx.concatenate(CGAffineTransform(a: rect.width / CGFloat(page.width), b: 0, c: 0,
+                                                      d: -rect.height / CGFloat(page.height),
+                                                      tx: rect.minX, ty: rect.maxY))
+                    VectorRenderer.draw(layerStrokes, in: ctx, file: file)
+                    ctx.restoreGState()
+                    continue
+                }
+            }
+            if let image = try LayerCompositor.render(page: page, in: file, background: .transparent,
+                                                      include: { $0.name == layer.name }) {
+                ctx.interpolationQuality = .high
+                ctx.draw(image, in: rect)
+            }
+        }
+    }
+
+    private static func recognizeIfNeeded(_ file: SNFile, _ options: RenderOptions) -> [Int: [RecognizedWord]] {
+        guard options.textLayer else { return [:] }
+        return TextLayer.recognize(file: file, cacheDirectory: options.ocrCacheDirectory, progress: options.progress)
     }
 
     public static func openPDF(_ url: URL) -> CGPDFDocument? {

@@ -1,32 +1,45 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import PDFKit
 import SupernoteKit
 import UniformTypeIdentifiers
 
-// Usage: snrender <file.note|file.pdf.mark> <out.pdf> [--png <dir>] [--dpi <n>]
+// Usage: snrender <file.note|file.pdf.mark> <out.pdf> [--png <dir>] [--dpi <n>] [--bitmap] [--ocr]
 let args = CommandLine.arguments
 guard args.count >= 3 else {
-    FileHandle.standardError.write("usage: snrender <input> <out.pdf> [--png <dir>] [--dpi <n>]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: snrender <input> <out.pdf> [--png <dir>] [--dpi <n>] [--bitmap] [--ocr]\n".data(using: .utf8)!)
     exit(2)
 }
 let input = URL(fileURLWithPath: args[1])
 let output = URL(fileURLWithPath: args[2])
 let pngDir = args.firstIndex(of: "--png").map { URL(fileURLWithPath: args[$0 + 1]) }
 let dpi = args.firstIndex(of: "--dpi").flatMap { Double(args[$0 + 1]) } ?? 100
+let options = RenderOptions(vector: !args.contains("--bitmap"), textLayer: args.contains("--ocr"))
 
 do {
     let file = try SNFile(url: input)
     print("\(file.fileType) \(file.signature) \(file.header["APPLY_EQUIPMENT"] ?? "?") \(file.deviceWidth)x\(file.deviceHeight), \(file.pages.count) page(s)")
     for page in file.pages {
         let layers = page.visibleLayers(fileType: file.fileType).map(\.name).joined(separator: ",")
-        print("  page \(page.number): \(page.width)x\(page.height) style=\(page.style) visible=[\(layers)]")
+        let strokes = page.strokes(in: file)
+        let strokeInfo = strokes.map { s in
+            "strokes=\(s.count) ink=\(s.filter(\.isInk).count) deleted=\(s.filter(\.isDeleted).count) erasers=\(s.filter(\.isEraser).count)"
+        } ?? "strokes=none"
+        print("  page \(page.number): \(page.width)x\(page.height) style=\(page.style) visible=[\(layers)] \(strokeInfo)")
     }
 
     let start = Date()
-    let pdf = try PDFRenderer.render(contentsOf: input)
+    let pdf = try PDFRenderer.render(contentsOf: input, options: options)
     try pdf.write(to: output)
     print(String(format: "wrote %@ (%d KB) in %.2fs", output.path, pdf.count / 1024, Date().timeIntervalSince(start)))
+
+    if options.textLayer, let doc = PDFDocument(data: pdf) {
+        for i in 0..<doc.pageCount {
+            let text = (doc.page(at: i)?.string ?? "").split(whereSeparator: \.isNewline).joined(separator: " / ")
+            print("  text p\(i + 1): \(text)")
+        }
+    }
 
     if let pngDir {
         try FileManager.default.createDirectory(at: pngDir, withIntermediateDirectories: true)

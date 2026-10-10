@@ -53,8 +53,18 @@ public enum LayerCompositor {
         return t
     }
 
-    /// Renders a page's visible layers. Returns nil if nothing is visible on a transparent page.
-    public static func render(page: SNPage, in file: SNFile, background: Background) throws -> CGImage? {
+    /// Decodes an RLE layer into one color code per pixel; nil for non-RLE or empty layers.
+    public static func codes(of layer: SNLayer, page: SNPage, in file: SNFile) throws -> [UInt8]? {
+        guard layer.layerProtocol == "RATTA_RLE", let address = layer.bitmapAddress else { return nil }
+        let bitmap = try file.block(at: address)
+        let allBlank = layer.name == "BGLAYER" && page.style == "style_white" && bitmap.count == 0x140e
+        return RLEDecoder.decode(bitmap, width: page.width, height: page.height, allBlank: allBlank).codes
+    }
+
+    /// Renders a page's visible layers (optionally only those passing `include`).
+    /// Returns nil if nothing is visible on a transparent page.
+    public static func render(page: SNPage, in file: SNFile, background: Background,
+                              include: (SNLayer) -> Bool = { _ in true }) throws -> CGImage? {
         let w = page.width, h = page.height, count = w * h
         let table = inkTable(x2: file.usesX2Colors, markFile: file.fileType == .mark)
 
@@ -63,10 +73,9 @@ public enum LayerCompositor {
         var dstAlpha = [UInt8](repeating: 0, count: count)
         var anyInk = false
 
-        for layer in page.visibleLayers(fileType: file.fileType) {
+        for layer in page.visibleLayers(fileType: file.fileType) where include(layer) {
             guard let address = layer.bitmapAddress else { continue }
             let bitmap = try file.block(at: address)
-            let isBackground = layer.name == "BGLAYER"
 
             if layer.layerProtocol == "PNG" {
                 guard let (g, a) = decodePNG(bitmap, width: w, height: h) else { continue }
@@ -74,10 +83,7 @@ public enum LayerCompositor {
                 anyInk = true
                 continue
             }
-            guard layer.layerProtocol == "RATTA_RLE" else { continue }
-
-            let allBlank = isBackground && page.style == "style_white" && bitmap.count == 0x140e
-            let codes = RLEDecoder.decode(bitmap, width: w, height: h, allBlank: allBlank).codes
+            guard let codes = try Self.codes(of: layer, page: page, in: file) else { continue }
             anyInk = true
 
             dstGray.withUnsafeMutableBufferPointer { dg in

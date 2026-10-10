@@ -78,6 +78,66 @@ final class SupernoteKitTests: XCTestCase {
         XCTAssertEqual(mark.numberOfPages, 2)
     }
 
+    func testParsesStrokes() throws {
+        let note = try SNFile(url: noteURL)
+        let strokes = try note.pages.map { try XCTUnwrap($0.strokes(in: note)) }
+        XCTAssertEqual(strokes.map(\.count), [491, 181, 102, 315])
+        XCTAssertEqual(strokes[0].filter(\.isDeleted).count, 3)
+        XCTAssertEqual(strokes[0].filter(\.isEraser).count, 2)
+        XCTAssertEqual(strokes[0].filter { $0.layer == 1 }.count, 5)
+        XCTAssertTrue(strokes[0].filter { $0.layer == 1 }.allSatisfy(\.isMarker))
+
+        let mark = try SNFile(url: markURL)
+        XCTAssertEqual(try mark.pages.map { try XCTUnwrap($0.strokes(in: mark)).count }, [189, 151])
+    }
+
+    func testVectorStrokesReproduceEveryBitmapLayer() throws {
+        for url in [noteURL, markURL] {
+            let file = try SNFile(url: url)
+            for page in file.pages {
+                let strokes = try XCTUnwrap(page.strokes(in: file))
+                for layer in page.visibleLayers(fileType: file.fileType) where layer.name != "BGLAYER" {
+                    let index = try XCTUnwrap(SNStroke.layerIndex(forLayerName: layer.name))
+                    let codes = try XCTUnwrap(LayerCompositor.codes(of: layer, page: page, in: file))
+                    XCTAssertTrue(VectorRenderer.covers(strokes.filter { $0.layer == index }, codes: codes,
+                                                        width: page.width, height: page.height),
+                                  "\(url.lastPathComponent) page \(page.number) \(layer.name)")
+                }
+            }
+        }
+    }
+
+    func testCoverageGuardRejectsMissingStrokes() throws {
+        let file = try SNFile(url: noteURL)
+        let page = file.pages[1]
+        let layer = try XCTUnwrap(page.layers.first { $0.name == "MAINLAYER" })
+        let codes = try XCTUnwrap(LayerCompositor.codes(of: layer, page: page, in: file))
+        let strokes = try XCTUnwrap(page.strokes(in: file))
+        XCTAssertFalse(VectorRenderer.covers(Array(strokes.prefix(strokes.count / 2)), codes: codes,
+                                             width: page.width, height: page.height))
+    }
+
+    func testCorruptStrokeDataFallsBackToNil() throws {
+        let data = try Data(contentsOf: noteURL)
+        let file = try SNFile(url: noteURL)
+        let address = try XCTUnwrap(file.pages[1].metadata["TOTALPATH"].flatMap(Int.init))
+        var corrupt = data
+        // Claim a huge first record so parsing runs past the block.
+        corrupt.replaceSubrange(address + 8..<address + 12, with: [0xff, 0xff, 0xff, 0x0f])
+        let corruptFile = try SNFile(data: corrupt)
+        XCTAssertNil(corruptFile.pages[1].strokes(in: corruptFile))
+        // Rendering still works via bitmaps.
+        XCTAssertNoThrow(try PDFRenderer.renderNote(corruptFile))
+    }
+
+    func testRecognizesHandwriting() throws {
+        let file = try SNFile(url: noteURL)
+        let words = TextLayer.recognize(file: file, cacheDirectory: nil)
+        let page1 = try XCTUnwrap(words[1])
+        XCTAssertGreaterThan(page1.count, 10)
+        XCTAssertTrue(page1.allSatisfy { $0.box.minX >= 0 && $0.box.maxX <= 1.001 && $0.box.minY >= 0 && $0.box.maxY <= 1.001 })
+    }
+
     func testMarkWithoutCompanionStillRenders() throws {
         let file = try SNFile(url: markURL)
         let data = try PDFRenderer.renderMark(file, companion: nil, companionName: "missing.pdf")
