@@ -1,0 +1,41 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode project is generated from project.yml by XcodeGen
+SupernoteViewer.xcodeproj/
+
+# Xcode build output and user state
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Personal Supernote files used for local testing (tests skip if absent)
+example_files/
+*.note
+*.mark
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
