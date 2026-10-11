@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PDFKit
 import XCTest
 @testable import SupernoteKit
 
@@ -9,6 +10,9 @@ final class SupernoteKitTests: XCTestCase {
         .deletingLastPathComponent().appendingPathComponent("example_files")
     let noteURL = examples.appendingPathComponent("Hausbau-TODOS.note")
     let markURL = examples.appendingPathComponent("Elektroplanung Schäfer 25082026.pdf.mark")
+    /// Manta note with a typed text box ("Maybe they are also helpful for others") half covered by a marker.
+    let textBoxURL = examples.appendingPathComponent("20261011_112646.note")
+    static let typedText = "Maybe they are also helpful for others"
 
     override func setUpWithError() throws {
         // The sample files are personal and not committed; skip when they aren't present.
@@ -92,15 +96,17 @@ final class SupernoteKitTests: XCTestCase {
     }
 
     func testVectorStrokesReproduceEveryBitmapLayer() throws {
-        for url in [noteURL, markURL] {
+        let extra = FileManager.default.fileExists(atPath: textBoxURL.path) ? [textBoxURL] : []
+        for url in [noteURL, markURL] + extra {
             let file = try SNFile(url: url)
             for page in file.pages {
                 let strokes = try XCTUnwrap(page.strokes(in: file))
                 for layer in page.visibleLayers(fileType: file.fileType) where layer.name != "BGLAYER" {
                     let index = try XCTUnwrap(SNStroke.layerIndex(forLayerName: layer.name))
                     let codes = try XCTUnwrap(LayerCompositor.codes(of: layer, page: page, in: file))
-                    XCTAssertTrue(VectorRenderer.covers(strokes.filter { $0.layer == index }, codes: codes,
-                                                        width: page.width, height: page.height),
+                    let layerStrokes = strokes.filter { $0.layer == index }
+                    XCTAssertTrue(VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height,
+                                                        ignoring: layerStrokes.compactMap(\.textBox?.rect)),
                                   "\(url.lastPathComponent) page \(page.number) \(layer.name)")
                 }
             }
@@ -115,6 +121,62 @@ final class SupernoteKitTests: XCTestCase {
         let strokes = try XCTUnwrap(page.strokes(in: file))
         XCTAssertFalse(VectorRenderer.covers(Array(strokes.prefix(strokes.count / 2)), codes: codes,
                                              width: page.width, height: page.height))
+    }
+
+    func testCoverageGuardRejectsStrokesOutsideInk() throws {
+        let file = try SNFile(url: noteURL)
+        let page = file.pages[1]
+        let layer = try XCTUnwrap(page.layers.first { $0.name == "MAINLAYER" })
+        let codes = try XCTUnwrap(LayerCompositor.codes(of: layer, page: page, in: file))
+        let strokes = try XCTUnwrap(page.strokes(in: file)).filter { $0.layer == 0 }
+        XCTAssertTrue(VectorRenderer.covers(strokes, codes: codes, width: page.width, height: page.height))
+        // A filled bar over empty paper, like a text box frame mistaken for ink.
+        let bar = SNStroke(penType: 1, color: 0x61, width: 100, layer: 0, isDeleted: false,
+                           path: CGPath(rect: CGRect(x: 100, y: 2300, width: 900, height: 64), transform: nil),
+                           textBox: nil)
+        XCTAssertFalse(VectorRenderer.covers(strokes + [bar], codes: codes, width: page.width, height: page.height))
+    }
+
+    func testParsesTextBox() throws {
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: textBoxURL.path), "text box sample not present")
+        let file = try SNFile(url: textBoxURL)
+        let strokes = try XCTUnwrap(file.pages[0].strokes(in: file))
+        let boxes = strokes.filter { $0.textBox != nil }
+        XCTAssertEqual(boxes.count, 1)
+        let box = try XCTUnwrap(boxes.first?.textBox)
+        XCTAssertEqual(box.text, Self.typedText)
+        XCTAssertEqual(box.rect, CGRect(x: 124, y: 1122, width: 873, height: 64))
+        XCTAssertEqual(box.fontSize, 48)
+        XCTAssertFalse(boxes[0].isInk)
+        XCTAssertEqual(strokes.filter(\.isInk).count, strokes.count - 1)
+    }
+
+    func testTextBoxRendersAsText() throws {
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: textBoxURL.path), "text box sample not present")
+        let data = try PDFRenderer.render(contentsOf: textBoxURL)
+        let text = try XCTUnwrap(PDFDocument(data: data)?.page(at: 0)?.string)
+        XCTAssertTrue(text.contains(Self.typedText), text)
+
+        // Rasterize at device resolution: the box must hold glyphs, not a solid bar.
+        let page = try XCTUnwrap(CGPDFDocument(CGDataProvider(data: data as CFData)!)?.page(at: 1))
+        let (w, h) = (1920, 2560)
+        var pixels = [UInt8](repeating: 255, count: w * h)
+        pixels.withUnsafeMutableBytes { buf in
+            let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+            let box = page.getBoxRect(.mediaBox)
+            ctx.scaleBy(x: CGFloat(w) / box.width, y: CGFloat(h) / box.height)
+            ctx.drawPDFPage(page)
+        }
+        var dark = 0, total = 0
+        for y in 1122..<1186 {
+            for x in 124..<997 {
+                total += 1
+                if pixels[y * w + x] < 128 { dark += 1 }  // memory row 0 is the top row
+            }
+        }
+        XCTAssertGreaterThan(dark, total / 50, "no text drawn")
+        XCTAssertLessThan(dark, total / 3, "text box drawn as a bar")
     }
 
     func testCorruptStrokeDataFallsBackToNil() throws {

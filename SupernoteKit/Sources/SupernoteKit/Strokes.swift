@@ -17,11 +17,13 @@ public struct SNStroke {
     public let isDeleted: Bool
     /// Outline polygons in page pixel coordinates (origin top-left, y down). Fill with even-odd.
     public let path: CGPath
+    /// Set for typed text boxes, whose "outline" is just their frame; the glyphs are only in the bitmap.
+    public let textBox: SNTextBox?
 
     public var isEraser: Bool { color == 255 }
     public var isMarker: Bool { penType == 11 || [0x66, 0x67, 0x68, 0x9e, 0xca].contains(color) }
-    /// Whether this stroke contributes visible ink.
-    public var isInk: Bool { !isDeleted && !isEraser && !path.isEmpty }
+    /// Whether this stroke contributes visible ink. Pen type 0 is not a pen (text boxes).
+    public var isInk: Bool { !isDeleted && !isEraser && penType != 0 && !path.isEmpty }
 
     public static func layerIndex(forLayerName name: String) -> Int? {
         switch name {
@@ -52,6 +54,8 @@ public struct SNStroke {
     /// - u32 + u16[] pressure, u32 + u32[] tilt, u32 + u8[] flags
     /// - 60 bytes (status i32 at +8; −4 = erased), u32 k + i32[k] eraser targets, 10 bytes
     /// - u32 contour count, each u32 m + m × (f32 x, f32 y)
+    /// - text boxes (pen type 0) continue with a block holding u32 length + comma-separated base64
+    ///   fields: [4] frame "x,y,w,h", [10] font size, [11] font path, [12] text
     static func parse(_ data: Data) throws -> SNStroke {
         var r = ByteReader(data)
         let penType = Int(try r.u32())
@@ -89,8 +93,9 @@ public struct SNStroke {
             addSmoothContour(points, to: path)
         }
 
+        let textBox = penType == 0 ? SNTextBox.parse(r.data[r.offset...]) : nil
         return SNStroke(penType: penType, color: color, width: width, layer: layer,
-                        isDeleted: status != 0, path: path)
+                        isDeleted: status != 0, path: path, textBox: textBox)
     }
 
     /// The device outlines are polygons on a quarter-pixel grid, which look faceted when zoomed in.
@@ -107,7 +112,48 @@ public struct SNStroke {
     }
 }
 
+/// A typed text box. The device renders its text into the layer bitmap.
+public struct SNTextBox {
+    /// Frame in page pixel coordinates (origin top-left, y down).
+    public let rect: CGRect
+    public let text: String
+    /// Font size in page pixels.
+    public let fontSize: Double
+
+    /// Finds the u32-length-prefixed list of base64 fields in a text box record's tail.
+    /// Best effort: nil if no such list is found or its fields don't parse.
+    static func parse(_ tail: Data) -> SNTextBox? {
+        let bytes = [UInt8](tail)
+        func isFieldByte(_ b: UInt8) -> Bool {
+            (0x41...0x5a).contains(b) || (0x61...0x7a).contains(b) || (0x30...0x39).contains(b)
+                || b == 0x2b || b == 0x2f || b == 0x3d || b == 0x2c
+        }
+        var i = 0
+        while i + 4 <= bytes.count {
+            let length = Int(bytes[i]) | Int(bytes[i + 1]) << 8 | Int(bytes[i + 2]) << 16 | Int(bytes[i + 3]) << 24
+            let start = i + 4
+            if length >= 16, start + length <= bytes.count, bytes[start..<start + length].allSatisfy(isFieldByte) {
+                let fields = String(decoding: bytes[start..<start + length], as: UTF8.self)
+                    .split(separator: ",", omittingEmptySubsequences: false)
+                    .map { Data(base64Encoded: String($0)).map { String(decoding: $0, as: UTF8.self) } }
+                guard fields.count > 12, let frame = fields[4], let size = fields[10].flatMap(Double.init),
+                      let text = fields[12] else { return nil }
+                let n = frame.split(separator: ",").compactMap { Double($0) }
+                guard n.count == 4, n[2] > 0, n[3] > 0 else { return nil }
+                return SNTextBox(rect: CGRect(x: n[0], y: n[1], width: n[2], height: n[3]), text: text, fontSize: size)
+            }
+            i += 1
+        }
+        return nil
+    }
+}
+
 extension SNPage {
+    /// Typed text boxes on the page (from its strokes), excluding deleted ones.
+    public func textBoxes(in file: SNFile) -> [SNTextBox] {
+        (strokes(in: file) ?? []).filter { !$0.isDeleted }.compactMap(\.textBox)
+    }
+
     /// The page's strokes, or nil if the page has no TOTALPATH or it can't be parsed.
     public func strokes(in file: SNFile) -> [SNStroke]? {
         guard let address = metadata.address("TOTALPATH"),

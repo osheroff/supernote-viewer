@@ -24,6 +24,9 @@ public struct RenderOptions {
 
 /// Renders Supernote files to PDF data.
 public enum PDFRenderer {
+    /// Bumped when output changes, so cached renders are redone.
+    public static let version = 2
+
     /// Renders a `.note` or `.mark` file. For `.mark`, the companion PDF next to it is used when readable.
     public static func render(contentsOf url: URL, options: RenderOptions = RenderOptions()) throws -> Data {
         let file = try SNFile(url: url)
@@ -46,7 +49,7 @@ public enum PDFRenderer {
                 ctx.setFillColor(gray: 1, alpha: 1)
                 ctx.fill(rect)
                 try drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
-                if let w = words[page.number] { TextLayer.draw(w, in: ctx, rect: rect) }
+                TextLayer.draw(textWords(of: page, in: file, recognized: words[page.number]), in: ctx, rect: rect)
                 ctx.endPDFPage()
             }
         }
@@ -102,7 +105,7 @@ public enum PDFRenderer {
 
                 if let mark {
                     try drawInk(of: mark, in: file, ctx: ctx, rect: box, options: options)
-                    if let w = words[mark.number] { TextLayer.draw(w, in: ctx, rect: box) }
+                    TextLayer.draw(textWords(of: mark, in: file, recognized: words[mark.number]), in: ctx, rect: box)
                 }
 
                 if companion == nil && number == 1 {
@@ -115,6 +118,7 @@ public enum PDFRenderer {
 
     /// Draws a page's visible layers bottom-up into `rect`. Each handwriting layer is drawn as
     /// vector outlines when the stroke data reproduces its bitmap, otherwise as the bitmap.
+    /// Typed text boxes are drawn from the bitmap, since TOTALPATH only has their frames.
     /// The template background is always a bitmap.
     static func drawInk(of page: SNPage, in file: SNFile, ctx: CGContext, rect: CGRect, options: RenderOptions) throws {
         let strokes = options.vector ? page.strokes(in: file) : nil
@@ -123,12 +127,25 @@ public enum PDFRenderer {
             if let strokes, let index = SNStroke.layerIndex(forLayerName: layer.name),
                let codes = try LayerCompositor.codes(of: layer, page: page, in: file) {
                 let layerStrokes = strokes.filter { $0.layer == index }
-                if VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height) {
+                let textRects = layerStrokes.filter { !$0.isDeleted }.compactMap(\.textBox?.rect)
+                if VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height,
+                                         ignoring: textRects) {
                     ctx.saveGState()
                     // Page pixels (origin top-left, y down) -> rect.
                     ctx.concatenate(CGAffineTransform(a: rect.width / CGFloat(page.width), b: 0, c: 0,
                                                       d: -rect.height / CGFloat(page.height),
                                                       tx: rect.minX, ty: rect.maxY))
+                    ctx.interpolationQuality = .high
+                    for textRect in textRects {
+                        guard let (image, r) = LayerCompositor.textBoxImage(codes: codes, rect: textRect,
+                                                                            page: page, file: file) else { continue }
+                        // Undo the y flip locally so the image is drawn upright.
+                        ctx.saveGState()
+                        ctx.translateBy(x: 0, y: r.maxY)
+                        ctx.scaleBy(x: 1, y: -1)
+                        ctx.draw(image, in: CGRect(x: r.minX, y: 0, width: r.width, height: r.height))
+                        ctx.restoreGState()
+                    }
                     VectorRenderer.draw(layerStrokes, in: ctx, file: file)
                     ctx.restoreGState()
                     continue
@@ -140,6 +157,20 @@ public enum PDFRenderer {
                 ctx.draw(image, in: rect)
             }
         }
+    }
+
+    /// Words for the invisible text layer: typed text boxes verbatim, plus recognized handwriting
+    /// outside them (OCR would only add a second, possibly garbled copy of the typed text).
+    static func textWords(of page: SNPage, in file: SNFile, recognized: [RecognizedWord]?) -> [RecognizedWord] {
+        let w = CGFloat(page.width), h = CGFloat(page.height)
+        let typed = page.textBoxes(in: file).map { box in
+            RecognizedWord(text: box.text, box: CGRect(x: box.rect.minX / w, y: 1 - box.rect.maxY / h,
+                                                       width: box.rect.width / w, height: box.rect.height / h))
+        }
+        let handwritten = (recognized ?? []).filter { word in
+            !typed.contains { $0.box.contains(CGPoint(x: word.box.midX, y: word.box.midY)) }
+        }
+        return typed + handwritten
     }
 
     private static func recognizeIfNeeded(_ file: SNFile, _ options: RenderOptions) -> [Int: [RecognizedWord]] {

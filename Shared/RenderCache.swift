@@ -18,6 +18,8 @@ enum RenderCache {
         var sourceModified: Double
         var sourceSize: Int
         var pdfModified: Double
+        /// `PDFRenderer.version` it was rendered with; nil for renders from before it was recorded.
+        var rendererVersion: Int?
     }
 
     /// Returns an up-to-date PDF for `source`, rendering it if needed.
@@ -41,13 +43,14 @@ enum RenderCache {
                 guard let record = records[name], abs(record.pdfModified - pdfModified) < 1 else {
                     continue  // edited in Preview (or unknown): leave it alone
                 }
-                if record.sourceModified == sourceModified && record.sourceSize == sourceSize {
+                if record.sourceModified == sourceModified && record.sourceSize == sourceSize
+                    && record.rendererVersion == PDFRenderer.version {
                     return pdfURL
                 }
             }
             try await render(source, to: pdfURL)
             records[name] = RenderRecord(sourceModified: sourceModified, sourceSize: sourceSize,
-                                         pdfModified: modificationTime(pdfURL))
+                                         pdfModified: modificationTime(pdfURL), rendererVersion: PDFRenderer.version)
             try JSONEncoder().encode(records).write(to: recordsURL, options: .atomic)
             return pdfURL
         }

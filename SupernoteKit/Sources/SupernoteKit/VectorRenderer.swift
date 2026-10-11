@@ -57,8 +57,11 @@ enum VectorRenderer {
     }
 
     /// Checks that the strokes reproduce a layer's bitmap: at most max(50 px, 0.5%) of its solid
-    /// ink may be left uncovered. Fails for content TOTALPATH doesn't describe (images, text boxes).
-    static func covers(_ strokes: [SNStroke], codes: [UInt8], width: Int, height: Int) -> Bool {
+    /// ink may be left uncovered, and at most max(50 px, 1%) of it may be painted where the bitmap is
+    /// empty. Fails for content TOTALPATH doesn't describe (images) or misdescribes. Pixels inside
+    /// `ignoring` (text boxes, whose glyphs are only in the bitmap) don't count as uncovered.
+    static func covers(_ strokes: [SNStroke], codes: [UInt8], width: Int, height: Int,
+                       ignoring rects: [CGRect] = []) -> Bool {
         var mask = [UInt8](repeating: 0, count: width * height)
         let drawn: Bool = mask.withUnsafeMutableBytes { buf in
             guard let ctx = CGContext(data: buf.baseAddress, width: width, height: height, bitsPerComponent: 8,
@@ -77,11 +80,25 @@ enum VectorRenderer {
         }
         guard drawn else { return false }
 
-        var solid = 0, uncovered = 0
-        for i in 0..<min(codes.count, mask.count) where solidCodes.contains(codes[i]) {
-            solid += 1
-            if mask[i] == 0 { uncovered += 1 }
+        var ignored = [Bool](repeating: false, count: rects.isEmpty ? 0 : width * height)
+        for rect in rects {
+            let r = rect.integral.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+            guard !r.isNull, !r.isEmpty else { continue }
+            for y in Int(r.minY)..<Int(r.maxY) {
+                for x in Int(r.minX)..<Int(r.maxX) { ignored[y * width + x] = true }
+            }
         }
-        return uncovered <= max(50, solid / 200)
+
+        var solid = 0, uncovered = 0, overpainted = 0
+        for i in 0..<min(codes.count, mask.count) {
+            let code = codes[i]
+            if solidCodes.contains(code) {
+                solid += 1
+                if mask[i] == 0 && (ignored.isEmpty || !ignored[i]) { uncovered += 1 }
+            } else if code == RLEDecoder.transparent && mask[i] >= 128 {
+                overpainted += 1
+            }
+        }
+        return uncovered <= max(50, solid / 200) && overpainted <= max(50, solid / 100)
     }
 }

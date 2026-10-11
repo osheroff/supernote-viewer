@@ -85,28 +85,7 @@ public enum LayerCompositor {
             }
             guard let codes = try Self.codes(of: layer, page: page, in: file) else { continue }
             anyInk = true
-
-            dstGray.withUnsafeMutableBufferPointer { dg in
-                dstAlpha.withUnsafeMutableBufferPointer { da in
-                    codes.withUnsafeBufferPointer { src in
-                        table.withUnsafeBufferPointer { ink in
-                            for i in 0..<count {
-                                let code = src[i]
-                                if code == RLEDecoder.transparent { continue }
-                                let s = ink[Int(code)]
-                                if s.alpha == 0 { continue }
-                                if s.alpha == 255 {
-                                    dg[i] = s.gray; da[i] = 255
-                                } else {
-                                    let inv = 255 - Int(s.alpha)
-                                    dg[i] = UInt8(Int(s.gray) + (Int(dg[i]) * inv + 127) / 255)
-                                    da[i] = UInt8(Int(s.alpha) + (Int(da[i]) * inv + 127) / 255)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            composite(codes: codes, table: table, dstGray: &dstGray, dstAlpha: &dstAlpha)
         }
 
         switch background {
@@ -129,6 +108,58 @@ public enum LayerCompositor {
                 out[i * 4 + 3] = dstAlpha[i]
             }
             return makeImage(bytes: out, width: w, height: h, gray: false)
+        }
+    }
+
+    /// Renders the part of a layer inside a text box as a transparent image of `rect` (page pixels,
+    /// clamped to the page). Marker ink is left out: the vector marker strokes are drawn over it.
+    /// Returns the image and the rect it covers.
+    static func textBoxImage(codes: [UInt8], rect: CGRect, page: SNPage, file: SNFile) -> (CGImage, CGRect)? {
+        let r = rect.integral.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        guard !r.isNull, r.width >= 1, r.height >= 1 else { return nil }
+        let x0 = Int(r.minX), y0 = Int(r.minY), w = Int(r.width), h = Int(r.height)
+        let markerCodes: Set<UInt8> = [0x66, 0x67, 0x68, 0x9e, 0xca]
+        var crop = [UInt8](repeating: RLEDecoder.transparent, count: w * h)
+        for y in 0..<h {
+            for x in 0..<w {
+                let code = codes[(y0 + y) * page.width + x0 + x]
+                if !markerCodes.contains(code) { crop[y * w + x] = code }
+            }
+        }
+        var gray = [UInt8](repeating: 0, count: w * h)
+        var alpha = [UInt8](repeating: 0, count: w * h)
+        composite(codes: crop, table: inkTable(x2: file.usesX2Colors, markFile: file.fileType == .mark),
+                  dstGray: &gray, dstAlpha: &alpha)
+        var out = [UInt8](repeating: 0, count: w * h * 4)
+        for i in 0..<(w * h) {
+            out[i * 4] = gray[i]; out[i * 4 + 1] = gray[i]; out[i * 4 + 2] = gray[i]
+            out[i * 4 + 3] = alpha[i]
+        }
+        return makeImage(bytes: out, width: w, height: h, gray: false).map { ($0, r) }
+    }
+
+    /// Composites color codes onto premultiplied gray + alpha planes of the same size.
+    private static func composite(codes: [UInt8], table: [Ink], dstGray: inout [UInt8], dstAlpha: inout [UInt8]) {
+        dstGray.withUnsafeMutableBufferPointer { dg in
+            dstAlpha.withUnsafeMutableBufferPointer { da in
+                codes.withUnsafeBufferPointer { src in
+                    table.withUnsafeBufferPointer { ink in
+                        for i in 0..<min(src.count, dg.count) {
+                            let code = src[i]
+                            if code == RLEDecoder.transparent { continue }
+                            let s = ink[Int(code)]
+                            if s.alpha == 0 { continue }
+                            if s.alpha == 255 {
+                                dg[i] = s.gray; da[i] = 255
+                            } else {
+                                let inv = 255 - Int(s.alpha)
+                                dg[i] = UInt8(Int(s.gray) + (Int(dg[i]) * inv + 127) / 255)
+                                da[i] = UInt8(Int(s.alpha) + (Int(da[i]) * inv + 127) / 255)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
