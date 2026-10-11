@@ -41,7 +41,7 @@ For floor plans and sketches: choose **Calibrate** and drag along a length you k
 ## Install
 
 1. Download the **.dmg** from the [latest release](https://github.com/schaefer-dev/supernote-viewer/releases/latest).
-2. Open it and drag both apps to **Applications**. The apps are signed and notarized by Apple, so they open without security warnings.
+2. Open it and drag both apps to **Applications**. The apps are signed, so they should open without any security warnings.
 3. Open **Supernote Viewer** once. This turns on the Quick Look extension.
 4. Choose which app opens your files. In Finder, select a `.note` file → **Get Info** → **Open with** → pick an app → **Change All…**. Do the same for a `.mark` file.
    - **Supernote Viewer** if you want thumbnails, live reload or measuring.
