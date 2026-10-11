@@ -8,10 +8,16 @@ APPS=("Supernote Viewer" "Supernote Preview Bridge")
 SCHEMES=("SupernoteViewer" "SupernotePreviewBridge")
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
+# Signs ad-hoc unless DEVELOPMENT_TEAM is set, e.g. DEVELOPMENT_TEAM=ABCDE12345 ./install.sh
+SIGNING=()
+if [[ -n "${DEVELOPMENT_TEAM:-}" ]]; then
+  SIGNING=(DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_IDENTITY="Apple Development")
+fi
+
 xcodegen generate --quiet
 for scheme in "${SCHEMES[@]}"; do
   xcodebuild -project SupernoteViewer.xcodeproj -scheme "$scheme" -configuration Release \
-    -derivedDataPath build/DerivedData build -quiet
+    -derivedDataPath build/DerivedData build -quiet "${SIGNING[@]}"
 done
 
 mkdir -p ~/Applications

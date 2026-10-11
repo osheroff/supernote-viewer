@@ -33,6 +33,12 @@ Package.resolved
 example_files/
 *.note
 *.mark
+# Demo files are committed
+!examples/*.note
+!examples/*.mark
+
+# Release output
+dist/
 
 # Editors
 .vscode/
