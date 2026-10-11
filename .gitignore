@@ -36,6 +36,9 @@ example_files/
 # Demo files are committed
 !examples/*.note
 !examples/*.mark
+# Test fixtures from supernote-typescript are committed
+!SupernoteKit/Tests/Fixtures/**/*.note
+!SupernoteKit/Tests/Fixtures/**/*.mark
 
 # Release output
 dist/

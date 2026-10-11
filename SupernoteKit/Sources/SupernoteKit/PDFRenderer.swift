@@ -25,7 +25,7 @@ public struct RenderOptions {
 /// Renders Supernote files to PDF data.
 public enum PDFRenderer {
     /// Bumped when output changes, so cached renders are redone.
-    public static let version = 2
+    public static let version = 3
 
     /// Renders a `.note` or `.mark` file. For `.mark`, the companion PDF next to it is used when readable.
     public static func render(contentsOf url: URL, options: RenderOptions = RenderOptions()) throws -> Data {

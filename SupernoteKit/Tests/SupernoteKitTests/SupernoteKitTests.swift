@@ -209,7 +209,8 @@ final class ExampleFileTests: XCTestCase {
 
 func assertVectorStrokesReproduceBitmaps(_ url: URL, file: StaticString = #filePath, line: UInt = #line) throws {
     let snFile = try SNFile(url: url)
-    for page in snFile.pages {
+    // Pages nobody wrote on have no TOTALPATH; one that is present must parse.
+    for page in snFile.pages where page.metadata.address("TOTALPATH") != nil {
         let strokes = try XCTUnwrap(page.strokes(in: snFile), file: file, line: line)
         for layer in page.visibleLayers(fileType: snFile.fileType) where layer.name != "BGLAYER" {
             let index = try XCTUnwrap(SNStroke.layerIndex(forLayerName: layer.name), file: file, line: line)

@@ -50,12 +50,15 @@ public struct SNStroke {
 
     /// Record layout (little-endian):
     /// - 0: u32 pen type, 4: u32 color, 8: u32 width, 44: u32 layer, 48: name, 124: coordinate space
-    /// - 212: u32 n, n × (u32, u32) raw samples
-    /// - u32 + u16[] pressure, u32 + u32[] tilt, u32 + u8[] flags
-    /// - 60 bytes (status i32 at +8; −4 = erased), u32 k + i32[k] eraser targets, 10 bytes
+    /// - 208: u32 + 24-byte disable areas (usually none)
+    /// - u32 n, n × (u32, u32) raw samples
+    /// - u32 + u16[] pressure, u32 + u32[] tilt, u32 + u8[] flags, u32 + 8-byte[] and u32 + i32[] epa data
+    /// - 52 bytes (status i32 at +0; nonzero = erased), u32 k + i32[k] eraser targets, 10 bytes
     /// - u32 contour count, each u32 m + m × (f32 x, f32 y)
     /// - text boxes (pen type 0) continue with a block holding u32 length + comma-separated base64
     ///   fields: [4] frame "x,y,w,h", [10] font size, [11] font path, [12] text
+    ///
+    /// The optional lists are mapped in supernote-typescript's `plans/vector-format-spec.md`.
     static func parse(_ data: Data) throws -> SNStroke {
         var r = ByteReader(data)
         let penType = Int(try r.u32())
@@ -64,17 +67,19 @@ public struct SNStroke {
         r.offset = 44
         let layer = Int(try r.u32())
 
-        r.offset = 212
+        r.offset = 208
+        try r.skip(Int(try r.u32()) * 24)  // disable areas
         let samples = Int(try r.u32())
         try r.skip(samples * 8)
         try r.skip(Int(try r.u32()) * 2)  // pressure
         try r.skip(Int(try r.u32()) * 4)  // tilt
         try r.skip(Int(try r.u32()))      // per-sample flags
+        try r.skip(Int(try r.u32()) * 8)  // epa points
+        try r.skip(Int(try r.u32()) * 4)  // epa grays
 
         let base = r.offset
-        r.offset = base + 8
         let status = try r.i32()
-        r.offset = base + 60
+        r.offset = base + 52
         let erasedCount = Int(try r.u32())
         try r.skip(erasedCount * 4 + 10)
 
@@ -149,9 +154,10 @@ public struct SNTextBox {
 }
 
 extension SNPage {
-    /// Typed text boxes on the page (from its strokes), excluding deleted ones.
+    /// Typed text boxes on the page (from its strokes), excluding deleted ones. Heading, link and
+    /// star frames are stored like text boxes but with the text "none"; those are left out.
     public func textBoxes(in file: SNFile) -> [SNTextBox] {
-        (strokes(in: file) ?? []).filter { !$0.isDeleted }.compactMap(\.textBox)
+        (strokes(in: file) ?? []).filter { !$0.isDeleted }.compactMap(\.textBox).filter { $0.text != "none" }
     }
 
     /// The page's strokes, or nil if the page has no TOTALPATH or it can't be parsed.
