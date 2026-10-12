@@ -82,6 +82,24 @@ final class UpstreamFixtureTests: XCTestCase {
         }
     }
 
+    /// The custom template is a PNG in a layer without LAYERPROTOCOL; decoded as RLE it rendered
+    /// as a band of gray and black stripes across the top of the page.
+    func testUndeclaredPNGBackground() throws {
+        let file = try SNFile(url: Self.url("render-n6-20230015-moonchild-user-bg.note"))
+        let page = file.pages[0]
+        let bg = try XCTUnwrap(page.layers.first { $0.name == "BGLAYER" })
+        XCTAssertEqual(bg.layerProtocol, "PNG")
+        XCTAssertEqual(page.layers.first { $0.name == "MAINLAYER" }?.layerProtocol, "RATTA_RLE")
+        XCTAssertTrue(try LayerCompositor.codes(of: bg, page: page, in: file) == nil, "PNG decoded as RLE")
+
+        // The 7mm lined template leaves most of the top of the page white.
+        let image = try XCTUnwrap(LayerCompositor.render(page: page, in: file, background: .white,
+                                                         include: { $0.name == "BGLAYER" }))
+        let pixels = try XCTUnwrap(image.dataProvider?.data as Data?)
+        let top = pixels.prefix(page.width * 300)
+        XCTAssertGreaterThan(Double(top.filter { $0 > 0xf0 }.count) / Double(top.count), 0.8)
+    }
+
     func testHeadingFramesAreNotText() throws {
         let file = try SNFile(url: Self.url("heading-n5-20260016-backgrounds-marker.note"))
         let page = file.pages[1]

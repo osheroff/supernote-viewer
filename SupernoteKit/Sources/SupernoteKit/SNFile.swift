@@ -154,16 +154,17 @@ public final class SNFile {
                 var name = lm["LAYERNAME"] ?? key
                 // Some firmware labels the background layer MAINLAYER as well.
                 if name == "MAINLAYER", layers.contains(where: { $0.name == "MAINLAYER" }) { name = "BGLAYER" }
+                let bitmap = lm.address("LAYERBITMAP")
                 layers.append(SNLayer(
                     key: key, name: name,
-                    layerProtocol: lm["LAYERPROTOCOL"] ?? "RATTA_RLE",
+                    layerProtocol: Self.layerProtocol(declared: lm["LAYERPROTOCOL"], bitmapAt: bitmap, in: data),
                     layerType: lm["LAYERTYPE"] ?? "",
-                    bitmapAddress: lm.address("LAYERBITMAP")))
+                    bitmapAddress: bitmap))
             }
             if layers.isEmpty, let addr = meta.address("DATA") {
                 // Pre-layer X-series pages store a single bitmap directly.
                 layers.append(SNLayer(key: "MAINLAYER", name: "MAINLAYER",
-                                      layerProtocol: meta["PROTOCOL"] ?? "RATTA_RLE",
+                                      layerProtocol: Self.layerProtocol(declared: meta["PROTOCOL"], bitmapAt: addr, in: data),
                                       layerType: type == .mark ? "MARK" : "NOTE", bitmapAddress: addr))
             }
             let o = meta["ORIENTATION"]
@@ -193,6 +194,18 @@ public final class SNFile {
             throw SNError.outOfBounds("length field at \(offset)")
         }
         return data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }.littleEndian
+    }
+
+    /// The declared bitmap protocol, or, when the layer doesn't declare one, PNG if the bitmap is
+    /// a PNG (custom user templates on some firmware) and RATTA_RLE otherwise.
+    static func layerProtocol(declared: String?, bitmapAt address: Int?, in data: Data) -> String {
+        if let declared { return declared }
+        let pngSignature: [UInt8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+        if let address, let length = try? readUInt32(data, at: address), length >= 8,
+           address + 4 + 8 <= data.count, data[(address + 4)..<(address + 12)].elementsEqual(pngSignature) {
+            return "PNG"
+        }
+        return "RATTA_RLE"
     }
 
     static func block(_ data: Data, at address: Int) throws -> Data {
