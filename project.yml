@@ -29,6 +29,8 @@ targets:
       path: Viewer/Info.plist
       properties:
         CFBundleDisplayName: Supernote Viewer
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
         CFBundleDocumentTypes:
@@ -86,6 +88,8 @@ targets:
       path: Bridge/Info.plist
       properties:
         CFBundleDisplayName: Supernote Preview Bridge
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         NSPrincipalClass: NSApplication
         # No Dock icon: opening a file hands it straight to Preview.
@@ -117,6 +121,8 @@ targets:
       path: QuickLookPreview/Info.plist
       properties:
         CFBundleDisplayName: Supernote Quick Look
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.quicklook.preview
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PreviewProvider
