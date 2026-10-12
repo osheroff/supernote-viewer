@@ -12,11 +12,14 @@ public enum RLEDecoder {
     /// Decodes `data` into one color code per pixel, row-major.
     /// - Parameter allBlank: special case for blank `style_white` background layers, where a 0xff
     ///   length means 0x400 instead of 0x4000 pixels.
-    /// - Returns: the codes and the number of pixels the stream actually described.
-    public static func decode(_ data: Data, width: Int, height: Int, allBlank: Bool = false) -> (codes: [UInt8], decodedCount: Int) {
+    /// - Returns: the codes, the number of pixels the stream actually described, and the number of
+    ///   bytes left over once the page was full.
+    public static func decode(_ data: Data, width: Int, height: Int,
+                              allBlank: Bool = false) -> (codes: [UInt8], decodedCount: Int, unreadBytes: Int) {
         let expected = width * height
         var codes = [UInt8](repeating: transparent, count: expected)
         var pos = 0
+        var unread = 0
 
         codes.withUnsafeMutableBufferPointer { out in
             func emit(_ color: UInt8, _ length: Int) {
@@ -67,8 +70,21 @@ public enum RLEDecoder {
                         }
                     }
                 }
+                unread = bytes.count - i
             }
         }
-        return (codes, pos)
+        return (codes, pos, unread)
+    }
+
+    /// Decodes `data` only if it is a well-formed layer: the stream describes exactly the page and
+    /// nothing more. Every layer written by the device does; other data (an image mislabeled as
+    /// RATTA_RLE, corruption) almost never does, and would otherwise render as stripes.
+    /// The `allBlank` variant is tried as well if the first guess doesn't fit.
+    public static func decodeValidated(_ data: Data, width: Int, height: Int, allBlank: Bool = false) -> [UInt8]? {
+        for variant in [allBlank, !allBlank] {
+            let result = decode(data, width: width, height: height, allBlank: variant)
+            if result.decodedCount == width * height && result.unreadBytes == 0 { return result.codes }
+        }
+        return nil
     }
 }

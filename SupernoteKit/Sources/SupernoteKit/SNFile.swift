@@ -144,13 +144,15 @@ public final class SNFile {
         }
         pageRefs.sort { $0.number < $1.number }
 
+        // A page or layer whose block is unreadable is kept blank (or left out), so the rest of a
+        // damaged file still renders.
         let (w, h) = (deviceWidth, deviceHeight)
-        pages = try pageRefs.map { ref in
-            let meta = SNMetadata(try Self.block(data, at: ref.address))
+        pages = pageRefs.map { ref in
+            let meta = SNMetadata((try? Self.block(data, at: ref.address)) ?? Data())
             var layers: [SNLayer] = []
             for key in ["MAINLAYER", "LAYER1", "LAYER2", "LAYER3", "BGLAYER"] {
-                guard let addr = meta.address(key) else { continue }
-                let lm = SNMetadata(try Self.block(data, at: addr))
+                guard let addr = meta.address(key), let block = try? Self.block(data, at: addr) else { continue }
+                let lm = SNMetadata(block)
                 var name = lm["LAYERNAME"] ?? key
                 // Some firmware labels the background layer MAINLAYER as well.
                 if name == "MAINLAYER", layers.contains(where: { $0.name == "MAINLAYER" }) { name = "BGLAYER" }
@@ -196,16 +198,16 @@ public final class SNFile {
         return data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }.littleEndian
     }
 
-    /// The declared bitmap protocol, or, when the layer doesn't declare one, PNG if the bitmap is
-    /// a PNG (custom user templates on some firmware) and RATTA_RLE otherwise.
+    /// PNG if the bitmap is a PNG, otherwise the declared protocol (RATTA_RLE if none).
+    /// Custom user templates are PNGs, but depending on firmware their layer declares no
+    /// protocol or even RATTA_RLE.
     static func layerProtocol(declared: String?, bitmapAt address: Int?, in data: Data) -> String {
-        if let declared { return declared }
         let pngSignature: [UInt8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
         if let address, let length = try? readUInt32(data, at: address), length >= 8,
            address + 4 + 8 <= data.count, data[(address + 4)..<(address + 12)].elementsEqual(pngSignature) {
             return "PNG"
         }
-        return "RATTA_RLE"
+        return declared ?? "RATTA_RLE"
     }
 
     static func block(_ data: Data, at address: Int) throws -> Data {

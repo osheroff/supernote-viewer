@@ -53,18 +53,41 @@ public enum LayerCompositor {
         return t
     }
 
-    /// Decodes an RLE layer into one color code per pixel; nil for non-RLE or empty layers.
-    public static func codes(of layer: SNLayer, page: SNPage, in file: SNFile) throws -> [UInt8]? {
-        guard layer.layerProtocol == "RATTA_RLE", let address = layer.bitmapAddress else { return nil }
-        let bitmap = try file.block(at: address)
-        let allBlank = layer.name == "BGLAYER" && page.style == "style_white" && bitmap.count == 0x140e
-        return RLEDecoder.decode(bitmap, width: page.width, height: page.height, allBlank: allBlank).codes
+    /// What a layer's bitmap holds, once decoded.
+    enum Content {
+        /// One color code per pixel (RATTA_RLE).
+        case codes([UInt8])
+        /// Premultiplied gray + alpha planes (custom templates, stored as images).
+        case image(gray: [UInt8], alpha: [UInt8])
     }
 
-    /// Renders a page's visible layers (optionally only those passing `include`).
-    /// Returns nil if nothing is visible on a transparent page.
+    /// Decodes a layer's bitmap by what it contains rather than what it is labeled: firmware labels
+    /// custom template PNGs as RATTA_RLE or not at all. RLE is only accepted if it describes exactly
+    /// the page, so other data is never drawn as stripes. Returns nil for layers without a bitmap
+    /// and for bitmaps that are neither (unreadable or corrupt), which are then left out.
+    static func content(of layer: SNLayer, page: SNPage, in file: SNFile) -> Content? {
+        guard let address = layer.bitmapAddress, let bitmap = try? file.block(at: address) else { return nil }
+        func image() -> Content? {
+            decodeImage(bitmap, width: page.width, height: page.height).map { .image(gray: $0.0, alpha: $0.1) }
+        }
+        func rle() -> Content? {
+            let allBlank = layer.name == "BGLAYER" && page.style == "style_white" && bitmap.count == 0x140e
+            return RLEDecoder.decodeValidated(bitmap, width: page.width, height: page.height, allBlank: allBlank)
+                .map { .codes($0) }
+        }
+        return layer.layerProtocol == "PNG" ? image() ?? rle() : rle() ?? image()
+    }
+
+    /// Decodes an RLE layer into one color code per pixel; nil for image, empty or corrupt layers.
+    public static func codes(of layer: SNLayer, page: SNPage, in file: SNFile) -> [UInt8]? {
+        guard case .codes(let codes)? = content(of: layer, page: page, in: file) else { return nil }
+        return codes
+    }
+
+    /// Renders a page's visible layers (optionally only those passing `include`), leaving out
+    /// layers that can't be decoded. Returns nil if nothing is visible on a transparent page.
     public static func render(page: SNPage, in file: SNFile, background: Background,
-                              include: (SNLayer) -> Bool = { _ in true }) throws -> CGImage? {
+                              include: (SNLayer) -> Bool = { _ in true }) -> CGImage? {
         let w = page.width, h = page.height, count = w * h
         let table = inkTable(x2: file.usesX2Colors, markFile: file.fileType == .mark)
 
@@ -74,18 +97,15 @@ public enum LayerCompositor {
         var anyInk = false
 
         for layer in page.visibleLayers(fileType: file.fileType) where include(layer) {
-            guard let address = layer.bitmapAddress else { continue }
-            let bitmap = try file.block(at: address)
-
-            if layer.layerProtocol == "PNG" {
-                guard let (g, a) = decodePNG(bitmap, width: w, height: h) else { continue }
+            switch content(of: layer, page: page, in: file) {
+            case .codes(let codes)?:
+                composite(codes: codes, table: table, dstGray: &dstGray, dstAlpha: &dstAlpha)
+            case .image(let g, let a)?:
                 composite(srcGray: g, srcAlpha: a, dstGray: &dstGray, dstAlpha: &dstAlpha)
-                anyInk = true
+            case nil:
                 continue
             }
-            guard let codes = try Self.codes(of: layer, page: page, in: file) else { continue }
             anyInk = true
-            composite(codes: codes, table: table, dstGray: &dstGray, dstAlpha: &dstAlpha)
         }
 
         switch background {
@@ -171,9 +191,16 @@ public enum LayerCompositor {
         }
     }
 
-    /// Decodes a PNG layer (custom templates) into premultiplied gray + alpha planes.
-    private static func decodePNG(_ data: Data, width: Int, height: Int) -> ([UInt8], [UInt8])? {
+    /// Image formats accepted for layers. All are recognized by their signature, so arbitrary data
+    /// is never mistaken for an image (ImageIO also guesses formats such as TGA from content).
+    private static let imageTypes: Set<String> = ["public.png", "public.jpeg", "public.tiff", "com.compuserve.gif",
+                                                  "com.microsoft.bmp", "public.heic", "org.webmproject.webp"]
+
+    /// Decodes an image layer (custom templates are PNGs) into premultiplied gray + alpha planes,
+    /// scaled to the page.
+    private static func decodeImage(_ data: Data, width: Int, height: Int) -> ([UInt8], [UInt8])? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(src) as String?, imageTypes.contains(type),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
         var rgba = [UInt8](repeating: 0, count: width * height * 4)
         let drawn: Bool = rgba.withUnsafeMutableBytes { buf in

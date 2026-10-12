@@ -25,7 +25,7 @@ public struct RenderOptions {
 /// Renders Supernote files to PDF data.
 public enum PDFRenderer {
     /// Bumped when output changes, so cached renders are redone.
-    public static let version = 4
+    public static let version = 5
 
     /// Renders a `.note` or `.mark` file. For `.mark`, the companion PDF next to it is used when readable.
     public static func render(contentsOf url: URL, options: RenderOptions = RenderOptions()) throws -> Data {
@@ -48,7 +48,7 @@ public enum PDFRenderer {
                 beginPage(ctx, rect)
                 ctx.setFillColor(gray: 1, alpha: 1)
                 ctx.fill(rect)
-                try drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
+                drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
                 TextLayer.draw(textWords(of: page, in: file, recognized: words[page.number]), in: ctx, rect: rect)
                 ctx.endPDFPage()
             }
@@ -104,7 +104,7 @@ public enum PDFRenderer {
                 }
 
                 if let mark {
-                    try drawInk(of: mark, in: file, ctx: ctx, rect: box, options: options)
+                    drawInk(of: mark, in: file, ctx: ctx, rect: box, options: options)
                     TextLayer.draw(textWords(of: mark, in: file, recognized: words[mark.number]), in: ctx, rect: box)
                 }
 
@@ -119,40 +119,54 @@ public enum PDFRenderer {
     /// Draws a page's visible layers bottom-up into `rect`. Each handwriting layer is drawn as
     /// vector outlines when the stroke data reproduces its bitmap, otherwise as the bitmap.
     /// Typed text boxes are drawn from the bitmap, since TOTALPATH only has their frames.
-    /// The template background is always a bitmap.
-    static func drawInk(of page: SNPage, in file: SNFile, ctx: CGContext, rect: CGRect, options: RenderOptions) throws {
+    /// The template background is always a bitmap. Layers whose bitmap can't be decoded are drawn
+    /// from their strokes if they have any, and left out otherwise.
+    static func drawInk(of page: SNPage, in file: SNFile, ctx: CGContext, rect: CGRect, options: RenderOptions) {
         let strokes = options.vector ? page.strokes(in: file) : nil
 
+        func drawVector(_ layerStrokes: [SNStroke], textBoxes: [CGRect], codes: [UInt8]?) {
+            ctx.saveGState()
+            // Page pixels (origin top-left, y down) -> rect.
+            ctx.concatenate(CGAffineTransform(a: rect.width / CGFloat(page.width), b: 0, c: 0,
+                                              d: -rect.height / CGFloat(page.height),
+                                              tx: rect.minX, ty: rect.maxY))
+            ctx.interpolationQuality = .high
+            for textRect in textBoxes {
+                guard let codes, let (image, r) = LayerCompositor.textBoxImage(codes: codes, rect: textRect,
+                                                                               page: page, file: file) else { continue }
+                // Undo the y flip locally so the image is drawn upright.
+                ctx.saveGState()
+                ctx.translateBy(x: 0, y: r.maxY)
+                ctx.scaleBy(x: 1, y: -1)
+                ctx.draw(image, in: CGRect(x: r.minX, y: 0, width: r.width, height: r.height))
+                ctx.restoreGState()
+            }
+            VectorRenderer.draw(layerStrokes, in: ctx, file: file)
+            ctx.restoreGState()
+        }
+
         for layer in page.visibleLayers(fileType: file.fileType) {
-            if let strokes, let index = SNStroke.layerIndex(forLayerName: layer.name),
-               let codes = try LayerCompositor.codes(of: layer, page: page, in: file) {
+            let content = LayerCompositor.content(of: layer, page: page, in: file)
+            if let strokes, let index = SNStroke.layerIndex(forLayerName: layer.name) {
                 let layerStrokes = strokes.filter { $0.layer == index }
-                let textRects = layerStrokes.filter { !$0.isDeleted }.compactMap(\.textBox?.rect)
-                if VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height,
-                                         ignoring: textRects) {
-                    ctx.saveGState()
-                    // Page pixels (origin top-left, y down) -> rect.
-                    ctx.concatenate(CGAffineTransform(a: rect.width / CGFloat(page.width), b: 0, c: 0,
-                                                      d: -rect.height / CGFloat(page.height),
-                                                      tx: rect.minX, ty: rect.maxY))
-                    ctx.interpolationQuality = .high
-                    for textRect in textRects {
-                        guard let (image, r) = LayerCompositor.textBoxImage(codes: codes, rect: textRect,
-                                                                            page: page, file: file) else { continue }
-                        // Undo the y flip locally so the image is drawn upright.
-                        ctx.saveGState()
-                        ctx.translateBy(x: 0, y: r.maxY)
-                        ctx.scaleBy(x: 1, y: -1)
-                        ctx.draw(image, in: CGRect(x: r.minX, y: 0, width: r.width, height: r.height))
-                        ctx.restoreGState()
+                switch content {
+                case .codes(let codes)?:
+                    let textRects = layerStrokes.filter { !$0.isDeleted }.compactMap(\.textBox?.rect)
+                    if VectorRenderer.covers(layerStrokes, codes: codes, width: page.width, height: page.height,
+                                             ignoring: textRects) {
+                        drawVector(layerStrokes, textBoxes: textRects, codes: codes)
+                        continue
                     }
-                    VectorRenderer.draw(layerStrokes, in: ctx, file: file)
-                    ctx.restoreGState()
+                case nil where layerStrokes.contains(where: \.isInk):
+                    // The bitmap is unusable; the strokes are the best remaining source.
+                    drawVector(layerStrokes, textBoxes: [], codes: nil)
                     continue
+                default:
+                    break
                 }
             }
-            if let image = try LayerCompositor.render(page: page, in: file, background: .transparent,
-                                                      include: { $0.name == layer.name }) {
+            if content != nil, let image = LayerCompositor.render(page: page, in: file, background: .transparent,
+                                                                  include: { $0.name == layer.name }) {
                 ctx.interpolationQuality = .high
                 ctx.draw(image, in: rect)
             }
