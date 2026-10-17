@@ -190,7 +190,6 @@ public final class SNFile {
             guard let pageNumber = Int(key.dropFirst(6).prefix(4)),
                     let addr = Int(value), addr > 0 else { continue }
             titleRefs.append((pageNumber, addr))
-            print("titleRef: \(pageNumber) \(addr)")
         }
         
         titles = titleRefs.map { ref in
