@@ -57,11 +57,26 @@ public enum PDFRenderer {
                 ctx.endPDFPage()
        
                 if let pageTitles = fileTitles[page.number] {
-                    for title in pageTitles {
+                    if pageTitles.count == 1 {
                         titles.append([
-                            kCGPDFOutlineTitle as String: title.text,
+                            kCGPDFOutlineTitle as String: "\(page.number): \(pageTitles[0].text)",
                             kCGPDFOutlineDestination as String: page.number
                         ])
+
+                    } else {
+                        var children = pageTitles.map { title in
+                            [
+                                kCGPDFOutlineTitle as String: "\(title.text)",
+                                kCGPDFOutlineDestination as String: page.number
+                            ]
+                        }
+                        titles.append(
+                            [
+                                kCGPDFOutlineTitle as String: "\(page.number):",
+                                kCGPDFOutlineDestination as String: page.number,
+                                kCGPDFOutlineChildren as String: children
+                            ]
+                        )
                     }
                 }
             }
