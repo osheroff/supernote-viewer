@@ -21,14 +21,14 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         RenderCache.cleanCache()
 
         // For development; if given a CLI argument clear the cache and re-render
+        // (arguments[0] is the executable; Xcode adds "-Flag value" pairs, which aren't files).
         let arguments = ProcessInfo.processInfo.arguments
-        if !arguments.isEmpty {
+        if arguments.count > 1, !arguments[1].hasPrefix("-") {
             let url = URL(fileURLWithPath: arguments[1])
             RenderCache.cleanCache(all: true)
             application(NSApplication.shared, open: [url])
-            
         }
-        
+
         // Files arrive via application(_:open:) right after launch; without any, show the info window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
             if !receivedFiles { showInfoWindow() }
