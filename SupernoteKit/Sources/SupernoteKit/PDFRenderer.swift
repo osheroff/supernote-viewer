@@ -25,7 +25,7 @@ public struct RenderOptions {
 /// Renders Supernote files to PDF data.
 public enum PDFRenderer {
     /// Bumped when output changes, so cached renders are redone.
-    public static let version = 5
+    public static let version = 6
 
     /// Renders a `.note` or `.mark` file. For `.mark`, the companion PDF next to it is used when readable.
     public static func render(contentsOf url: URL, options: RenderOptions = RenderOptions()) throws -> Data {
@@ -179,7 +179,7 @@ public enum PDFRenderer {
         let w = CGFloat(page.width), h = CGFloat(page.height)
         let typed = page.textBoxes(in: file).map { box in
             RecognizedWord(text: box.text, box: CGRect(x: box.rect.minX / w, y: 1 - box.rect.maxY / h,
-                                                       width: box.rect.width / w, height: box.rect.height / h))
+                                                       width: box.rect.width / w, height: box.rect.height / h), header: false)
         }
         let handwritten = (recognized ?? []).filter { word in
             !typed.contains { $0.box.contains(CGPoint(x: word.box.midX, y: word.box.midY)) }
@@ -218,6 +218,17 @@ public enum PDFRenderer {
             throw SNError.malformed("could not create PDF context")
         }
         try body(ctx)
+        let pageTitles = ["Introduction", "Chapter 1", "Chapter 2"]
+        // Build the outline: one entry per page
+        let children: [[String: Any]] = pageTitles.enumerated().map { i, title in
+            [
+                kCGPDFOutlineTitle as String: title,
+                kCGPDFOutlineDestination as String: i + 1   // page number, 1-based
+            ]
+        }
+        let outline: [String: Any] = [kCGPDFOutlineChildren as String: children]
+
+        CGPDFContextSetOutline(ctx, outline as CFDictionary)
         ctx.closePDF()
         return data as Data
     }

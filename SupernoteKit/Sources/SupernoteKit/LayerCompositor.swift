@@ -78,6 +78,17 @@ public enum LayerCompositor {
         return layer.layerProtocol == "PNG" ? image() ?? rle() : rle() ?? image()
     }
 
+    public static func render(title: SNTitle, in file: SNFile) -> CGImage? {
+        guard let address = title.bitmapAddress, let bitmap = try? file.block(at: address),
+              let width = title.width,
+              let height = title.height,
+              let content = RLEDecoder.decodeValidated(bitmap, width: width, height: height, allBlank: false)
+        else { return nil }
+        
+        return makeImage(bytes: content, width: width, height: height, gray: false)
+
+    }
+    
     /// Decodes an RLE layer into one color code per pixel; nil for image, empty or corrupt layers.
     public static func codes(of layer: SNLayer, page: SNPage, in file: SNFile) -> [UInt8]? {
         guard case .codes(let codes)? = content(of: layer, page: page, in: file) else { return nil }
