@@ -8,7 +8,6 @@ import Vision
 public struct RecognizedWord: Codable {
     public let text: String
     public let box: CGRect
-    public let header: Bool?
 }
 
 /// Handwriting recognition (Vision) and an invisible PDF text layer, so handwriting can be
@@ -41,16 +40,8 @@ public enum TextLayer {
             if words == nil {
                 let image = LayerCompositor.render(page: page, in: file, background: .white,
                                                    include: { $0.name != "BGLAYER" })
-                words = image.map { img in
-                    recognize(image: img, header: false)
-                } ?? []
-            
-                file.titles.filter { $0.pageNumber == page.number }.forEach { title in
-                    let titleImage = LayerCompositor.render(title: title, in: file)
-                    if let titleImage = titleImage {
-                        words! += recognize(image: titleImage, header: true)
-                    }
-                }
+                words = image.map { img in recognize(image: img) } ?? []
+        
                 if let cacheURL, let data = try? JSONEncoder().encode(words) {
                     try? data.write(to: cacheURL, options: .atomic)
                 }
@@ -64,9 +55,50 @@ public enum TextLayer {
         }
         return results
     }
+    
+    public static func recognizeTitles(file: SNFile, cacheDirectory: URL?) -> [Int: [RecognizedWord]] {
+        let pages = file.pages
+        let lock = NSLock()
+        var results: [Int: [RecognizedWord]] = [:]
+        
+        if let cacheDirectory {
+            try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        }
+
+        DispatchQueue.concurrentPerform(iterations: pages.count) { i in
+            let page = pages[i]
+            let cacheURL = cacheDirectory.flatMap { dir in
+                contentHash(of: page, in: file).map { dir.appendingPathComponent("\($0)-headers.json") }
+            }
+            var titles: [RecognizedWord]?
+            if let cacheURL, let data = try? Data(contentsOf: cacheURL) {
+                titles = try? JSONDecoder().decode([RecognizedWord].self, from: data)
+            }
+            
+            if titles == nil {
+                let pageTitles = file.titles.filter { $0.pageNumber == page.number }
+                
+                pageTitles.forEach { title in
+                    if let titleImage = LayerCompositor.render(title: title, in: file) {
+                        let titleWords = recognize(image: titleImage)
+                        let title = titleWords.map { $0.text }.joined(separator: " ")
+                        
+                        titles = (titles ?? []) + [RecognizedWord(text: title, box: titleWords[0].box)]
+                    }
+                }
+                if let cacheURL, let titles = titles, let data = try? JSONEncoder().encode(titles) {
+                    try? data.write(to: cacheURL, options: .atomic)
+                }
+            }
+            lock.lock()
+            results[page.number] = titles
+            lock.unlock()
+        }
+        return results
+    }
 
     /// Recognizes handwriting in an image, returning one entry per whitespace-separated word.
-    public static func recognize(image: CGImage, header: Bool) -> [RecognizedWord] {
+    public static func recognize(image: CGImage) -> [RecognizedWord] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -95,7 +127,7 @@ public enum TextLayer {
             // they only add noise to search results.
             for range in wordRanges where text[range].filter({ $0.isLetter || $0.isNumber }).count >= 2 {
                 let box = (try? candidate.boundingBox(for: range))?.boundingBox ?? observation.boundingBox
-                words.append(RecognizedWord(text: String(text[range]), box: box, header: header))
+                words.append(RecognizedWord(text: String(text[range]), box: box))
             }
         }
         return words

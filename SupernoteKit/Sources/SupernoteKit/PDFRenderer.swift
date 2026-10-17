@@ -42,7 +42,11 @@ public enum PDFRenderer {
 
     public static func renderNote(_ file: SNFile, options: RenderOptions = RenderOptions()) throws -> Data {
         let words = recognizeIfNeeded(file, options)
+        let fileTitles = TextLayer.recognizeTitles(file: file, cacheDirectory:  options.ocrCacheDirectory)
+        
         return try makePDF { ctx in
+            var titles: [[String : Any]] = []
+            
             for page in file.pages {
                 let rect = CGRect(origin: .zero, size: pointSize(page.width, page.height))
                 beginPage(ctx, rect)
@@ -51,7 +55,19 @@ public enum PDFRenderer {
                 drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
                 TextLayer.draw(textWords(of: page, in: file, recognized: words[page.number]), in: ctx, rect: rect)
                 ctx.endPDFPage()
+       
+                if let pageTitles = fileTitles[page.number] {
+                    for title in pageTitles {
+                        titles.append([
+                            kCGPDFOutlineTitle as String: title.text,
+                            kCGPDFOutlineDestination as String: page.number
+                        ])
+                    }
+                }
             }
+         
+            let outline: [String: Any] = [kCGPDFOutlineChildren as String: titles]
+            CGPDFContextSetOutline(ctx, outline as CFDictionary)
         }
     }
 
@@ -178,8 +194,11 @@ public enum PDFRenderer {
     static func textWords(of page: SNPage, in file: SNFile, recognized: [RecognizedWord]?) -> [RecognizedWord] {
         let w = CGFloat(page.width), h = CGFloat(page.height)
         let typed = page.textBoxes(in: file).map { box in
-            RecognizedWord(text: box.text, box: CGRect(x: box.rect.minX / w, y: 1 - box.rect.maxY / h,
-                                                       width: box.rect.width / w, height: box.rect.height / h), header: false)
+            RecognizedWord(text: box.text,
+                           box: CGRect(x: box.rect.minX / w,
+                                       y: 1 - box.rect.maxY / h,
+                                       width: box.rect.width / w,
+                                       height: box.rect.height / h))
         }
         let handwritten = (recognized ?? []).filter { word in
             !typed.contains { $0.box.contains(CGPoint(x: word.box.midX, y: word.box.midY)) }
@@ -218,17 +237,7 @@ public enum PDFRenderer {
             throw SNError.malformed("could not create PDF context")
         }
         try body(ctx)
-        let pageTitles = ["Introduction", "Chapter 1", "Chapter 2"]
-        // Build the outline: one entry per page
-        let children: [[String: Any]] = pageTitles.enumerated().map { i, title in
-            [
-                kCGPDFOutlineTitle as String: title,
-                kCGPDFOutlineDestination as String: i + 1   // page number, 1-based
-            ]
-        }
-        let outline: [String: Any] = [kCGPDFOutlineChildren as String: children]
-
-        CGPDFContextSetOutline(ctx, outline as CFDictionary)
+        
         ctx.closePDF()
         return data as Data
     }
