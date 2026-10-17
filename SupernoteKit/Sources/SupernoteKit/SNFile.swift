@@ -93,8 +93,8 @@ public struct SNTitle {
     public let pageNumber: Int
     public let metadata: SNMetadata
     public let bitmapAddress: Int?
-    /// Where the title sits on the page (TITLERECT, page pixels), tight around the ink.
-    public let rect: CGRect?
+    public let width: Int?
+    public let height: Int?
 }
 
 public final class SNFile {
@@ -204,7 +204,7 @@ public final class SNFile {
                     h = splits[3]
                 }
             }
-            
+
             return SNTitle(
                 pageNumber: ref.pageNumber,
                 metadata: meta,
