@@ -40,8 +40,7 @@ public enum TextLayer {
             if words == nil {
                 let image = LayerCompositor.render(page: page, in: file, background: .white,
                                                    include: { $0.name != "BGLAYER" })
-                words = image.map { img in recognize(image: img) } ?? []
-        
+                words = image.map(recognize(image:)) ?? []
                 if let cacheURL, let data = try? JSONEncoder().encode(words) {
                     try? data.write(to: cacheURL, options: .atomic)
                 }

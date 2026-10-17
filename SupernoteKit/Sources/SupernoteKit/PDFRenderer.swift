@@ -194,11 +194,8 @@ public enum PDFRenderer {
     static func textWords(of page: SNPage, in file: SNFile, recognized: [RecognizedWord]?) -> [RecognizedWord] {
         let w = CGFloat(page.width), h = CGFloat(page.height)
         let typed = page.textBoxes(in: file).map { box in
-            RecognizedWord(text: box.text,
-                           box: CGRect(x: box.rect.minX / w,
-                                       y: 1 - box.rect.maxY / h,
-                                       width: box.rect.width / w,
-                                       height: box.rect.height / h))
+            RecognizedWord(text: box.text, box: CGRect(x: box.rect.minX / w, y: 1 - box.rect.maxY / h,
+                                                       width: box.rect.width / w, height: box.rect.height / h))
         }
         let handwritten = (recognized ?? []).filter { word in
             !typed.contains { $0.box.contains(CGPoint(x: word.box.midX, y: word.box.midY)) }
@@ -237,7 +234,6 @@ public enum PDFRenderer {
             throw SNError.malformed("could not create PDF context")
         }
         try body(ctx)
-        
         ctx.closePDF()
         return data as Data
     }
