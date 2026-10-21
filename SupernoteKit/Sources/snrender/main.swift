@@ -39,6 +39,15 @@ do {
             let text = (doc.page(at: i)?.string ?? "").split(whereSeparator: \.isNewline).joined(separator: " / ")
             print("  text p\(i + 1): \(text)")
         }
+        func printOutline(_ item: PDFOutline, depth: Int) {
+            for i in 0..<item.numberOfChildren {
+                guard let child = item.child(at: i) else { continue }
+                let page = child.destination?.page.map { doc.index(for: $0) + 1 }.map(String.init) ?? "?"
+                print("  toc \(String(repeating: "  ", count: depth))\(child.label ?? "") (p\(page))")
+                printOutline(child, depth: depth + 1)
+            }
+        }
+        if let root = doc.outlineRoot { printOutline(root, depth: 0) }
     }
 
     if let pngDir {

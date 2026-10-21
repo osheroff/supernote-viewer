@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 public enum SNError: Error, CustomStringConvertible {
@@ -88,13 +89,35 @@ public struct SNPage {
     }
 }
 
-
+/// A title marked on a page (handwriting lassoed and given a title style on the device).
 public struct SNTitle {
+    /// Number of the page it is on, as in `SNPage.number`.
     public let pageNumber: Int
+    /// Outline level from TITLELEVEL; 1 is top level.
+    public let level: Int
+    /// Where the title sits, in page pixels (origin top-left).
+    public let rect: CGRect
     public let metadata: SNMetadata
-    public let bitmapAddress: Int?
-    public let width: Int?
-    public let height: Int?
+
+    /// Parses the block of a footer `TITLE_<page><y><x>` entry; nil without a page number or rect.
+    init?(key: String, metadata: SNMetadata) {
+        let digits = key.dropFirst("TITLE_".count)
+        guard key.hasPrefix("TITLE_"), digits.count >= 4,
+              let page = Int(digits.prefix(4)), page > 0 else { return nil }
+        // TITLERECT is the box around the title's ink; in A5X files TITLERECTORI is a taller box around it.
+        guard let rect = Self.rect(metadata["TITLERECT"]) ?? Self.rect(metadata["TITLERECTORI"]) else { return nil }
+        pageNumber = page
+        level = max(1, metadata["TITLELEVEL"].flatMap { Int($0) } ?? 1)
+        self.rect = rect
+        self.metadata = metadata
+    }
+
+    /// "x,y,width,height" with a positive size.
+    private static func rect(_ value: String?) -> CGRect? {
+        let parts = value?.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) } ?? []
+        guard parts.count == 4, parts[2] > 0, parts[3] > 0 else { return nil }
+        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    }
 }
 
 public final class SNFile {
@@ -104,6 +127,7 @@ public final class SNFile {
     public let header: SNMetadata
     public let footer: SNMetadata
     public let pages: [SNPage]
+    /// Titles in page order, top to bottom within a page.
     public let titles: [SNTitle]
 
     /// Device canvas size in portrait orientation.
@@ -184,36 +208,13 @@ public final class SNFile {
             return SNPage(number: ref.number, metadata: meta, layers: layers,
                           width: landscape ? h : w, height: landscape ? w : h)
         }
-        
-        var titleRefs: [(pageNumber: Int, address: Int)] = []
-        for (key, value) in footer.pairs where key.hasPrefix("TITLE_") {
-            guard let pageNumber = Int(key.dropFirst(6).prefix(4)),
-                    let addr = Int(value), addr > 0 else { continue }
-            titleRefs.append((pageNumber, addr))
-        }
-        
-        titles = titleRefs.map { ref in
-            let meta = SNMetadata((try? Self.block(data, at: ref.address)) ?? Data())
-            var w: Int?
-            var h: Int?
-            if let rect = meta["TITLERECT"] {
-                let splits = rect.split(separator: ",").map { Int($0) }
-                if splits.count == 4 {
-                    w = splits[2]
-                    h = splits[3]
-                }
-            }
 
-            return SNTitle(
-                pageNumber: ref.pageNumber,
-                metadata: meta,
-                bitmapAddress: meta.address("TITLEBITMAP"),
-                width: w,
-                height: h
-            )
-        }
-        
-        pageRefs.sort { $0.number < $1.number }
+        // Titles whose block is unreadable are left out, like damaged layers.
+        titles = footer.pairs.compactMap { key, value -> SNTitle? in
+            guard key.hasPrefix("TITLE_"), let addr = Int(value), addr > 0,
+                  let block = try? Self.block(data, at: addr) else { return nil }
+            return SNTitle(key: key, metadata: SNMetadata(block))
+        }.sorted { ($0.pageNumber, $0.rect.minY, $0.rect.minX) < ($1.pageNumber, $1.rect.minY, $1.rect.minX) }
     }
 
     /// Numeric file format version, e.g. 20260016.

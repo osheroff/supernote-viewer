@@ -42,47 +42,21 @@ public enum PDFRenderer {
 
     public static func renderNote(_ file: SNFile, options: RenderOptions = RenderOptions()) throws -> Data {
         let words = recognizeIfNeeded(file, options)
-        let fileTitles = TextLayer.recognizeTitles(file: file, cacheDirectory:  options.ocrCacheDirectory)
-        
         return try makePDF { ctx in
-            var titles: [[String : Any]] = []
-            
-            for page in file.pages {
+            var outlinePages: [Int: OutlinePage] = [:]
+            for (index, page) in file.pages.enumerated() {
                 let rect = CGRect(origin: .zero, size: pointSize(page.width, page.height))
                 beginPage(ctx, rect)
                 ctx.setFillColor(gray: 1, alpha: 1)
                 ctx.fill(rect)
                 drawInk(of: page, in: file, ctx: ctx, rect: rect, options: options)
-                TextLayer.draw(textWords(of: page, in: file, recognized: words[page.number]), in: ctx, rect: rect)
+                let pageWords = textWords(of: page, in: file, recognized: words[page.number])
+                TextLayer.draw(pageWords, in: ctx, rect: rect)
                 ctx.endPDFPage()
-       
-                if let pageTitles = fileTitles[page.number] {
-                    if pageTitles.count == 1 {
-                        titles.append([
-                            kCGPDFOutlineTitle as String: "\(page.number): \(pageTitles[0].text)",
-                            kCGPDFOutlineDestination as String: page.number
-                        ])
-
-                    } else {
-                        var children = pageTitles.map { title in
-                            [
-                                kCGPDFOutlineTitle as String: "\(title.text)",
-                                kCGPDFOutlineDestination as String: page.number
-                            ]
-                        }
-                        titles.append(
-                            [
-                                kCGPDFOutlineTitle as String: "\(page.number):",
-                                kCGPDFOutlineDestination as String: page.number,
-                                kCGPDFOutlineChildren as String: children
-                            ]
-                        )
-                    }
-                }
+                outlinePages[page.number] = OutlinePage(index: index + 1, width: page.width, height: page.height,
+                                                        words: pageWords)
             }
-         
-            let outline: [String: Any] = [kCGPDFOutlineChildren as String: titles]
-            CGPDFContextSetOutline(ctx, outline as CFDictionary)
+            if options.textLayer { setOutline(outline(titles: file.titles, pages: outlinePages), in: ctx) }
         }
     }
 
@@ -98,6 +72,7 @@ public enum PDFRenderer {
         let pageCount = max(pdfCount, file.pages.map(\.number).max() ?? 0)
 
         return try makePDF { ctx in
+            var outlinePages: [Int: OutlinePage] = [:]
             for number in 1...max(pageCount, 1) {
                 let mark = marksByNumber[number]
                 let deviceW = mark?.width ?? file.deviceWidth
@@ -136,7 +111,10 @@ public enum PDFRenderer {
 
                 if let mark {
                     drawInk(of: mark, in: file, ctx: ctx, rect: box, options: options)
-                    TextLayer.draw(textWords(of: mark, in: file, recognized: words[mark.number]), in: ctx, rect: box)
+                    let markWords = textWords(of: mark, in: file, recognized: words[mark.number])
+                    TextLayer.draw(markWords, in: ctx, rect: box)
+                    outlinePages[number] = OutlinePage(index: number, width: mark.width, height: mark.height,
+                                                       words: markWords)
                 }
 
                 if companion == nil && number == 1 {
@@ -144,6 +122,7 @@ public enum PDFRenderer {
                 }
                 ctx.endPDFPage()
             }
+            if options.textLayer { setOutline(outline(titles: file.titles, pages: outlinePages), in: ctx) }
         }
     }
 
@@ -216,6 +195,67 @@ public enum PDFRenderer {
             !typed.contains { $0.box.contains(CGPoint(x: word.box.midX, y: word.box.midY)) }
         }
         return typed + handwritten
+    }
+
+    // MARK: - Outline
+
+    /// An output page as the outline sees it.
+    struct OutlinePage {
+        /// 1-based page number in the output PDF.
+        var index: Int
+        /// Device page size in pixels, which title rects refer to.
+        var width: Int
+        var height: Int
+        /// Text layer words, in the coordinates of `RecognizedWord`.
+        var words: [RecognizedWord]
+    }
+
+    /// The PDF outline (Preview's Table of Contents) for `titles`, each labeled with the text
+    /// layer words inside it, nested by title level. `pages` is keyed by `SNPage.number`; titles
+    /// on other pages are left out. Nil when no entry remains.
+    static func outline(titles: [SNTitle], pages: [Int: OutlinePage]) -> [String: Any]? {
+        final class Entry {
+            let level: Int
+            let dictionary: [String: Any]
+            var children: [Entry] = []
+            init(level: Int, dictionary: [String: Any]) { self.level = level; self.dictionary = dictionary }
+
+            var outline: [String: Any] {
+                var d = dictionary
+                if !children.isEmpty { d[kCGPDFOutlineChildren as String] = children.map(\.outline) }
+                return d
+            }
+        }
+
+        let root = Entry(level: 0, dictionary: [:])
+        var open = [root]  // the current entry at each nesting depth
+        for title in titles {
+            guard let page = pages[title.pageNumber] else { continue }
+            let entry = Entry(level: title.level, dictionary: [
+                kCGPDFOutlineTitle as String: outlineLabel(for: title, on: page),
+                kCGPDFOutlineDestination as String: page.index,
+            ])
+            while open.count > 1, open[open.count - 1].level >= title.level { open.removeLast() }
+            open[open.count - 1].children.append(entry)
+            open.append(entry)
+        }
+        return root.children.isEmpty ? nil : root.outline
+    }
+
+    /// Text layer words whose center is inside the title, or "Page n" when there are none.
+    static func outlineLabel(for title: SNTitle, on page: OutlinePage) -> String {
+        let w = CGFloat(page.width), h = CGFloat(page.height)
+        // Page pixels (origin top-left) -> word coordinates (normalized, origin bottom-left).
+        let box = CGRect(x: title.rect.minX / w, y: 1 - title.rect.maxY / h,
+                         width: title.rect.width / w, height: title.rect.height / h)
+        let text = page.words.filter { box.contains(CGPoint(x: $0.box.midX, y: $0.box.midY)) }
+            .map(\.text).joined(separator: " ")
+        return text.isEmpty ? "Page \(page.index)" : text
+    }
+
+    private static func setOutline(_ outline: [String: Any]?, in ctx: CGContext) {
+        guard let outline else { return }
+        CGPDFContextSetOutline(ctx, outline as CFDictionary)
     }
 
     private static func recognizeIfNeeded(_ file: SNFile, _ options: RenderOptions) -> [Int: [RecognizedWord]] {
