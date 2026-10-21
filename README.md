@@ -93,6 +93,13 @@ This builds both apps and installs them to `~/Applications`. The apps are signed
 - `project.yml`: the XcodeGen spec. The `.xcodeproj` is generated from it.
 - `docs/hero/`: source of the README banner (`render.sh` regenerates it).
 
+### Debugging
+
+- Renderer changes: `snrender` always renders fresh and leaves the apps' cache alone, e.g. from `SupernoteKit/`: `swift run snrender "../examples/Example Titles.note" /tmp/out.pdf --ocr && open /tmp/out.pdf`.
+- The Bridge from Xcode: in the SupernotePreviewBridge scheme, Edit Scheme → Run → Arguments, tick the example path (or add your own `.note`/`.mark`) and press Run. Debug builds open it freshly rendered in Preview, with breakpoints working and nothing installed or deleted. Release builds ignore the argument.
+- Outside Xcode, `touch file.note` makes the apps render that file again.
+- SupernoteKit is compiled with optimization in Debug builds too (`Package.swift`); unoptimized, large notebooks take minutes.
+
 ### Stroke data (`TOTALPATH`)
 
 Each page's `TOTALPATH` block holds every stroke, including the device's own rendered outline polygons. Filling those outlines reproduces the device bitmap exactly. See `Strokes.swift` for the record layout.
