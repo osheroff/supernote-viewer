@@ -12,13 +12,18 @@ public struct RenderOptions {
     public var ocrCacheDirectory: URL?
     /// Called with handwriting recognition progress (pages done, total), from any thread.
     public var progress: ((_ done: Int, _ total: Int) -> Void)?
+    /// Called after each output page is drawn (pages done, total), from the rendering thread.
+    /// Drawing follows recognition.
+    public var pageProgress: ((_ done: Int, _ total: Int) -> Void)?
 
     public init(vector: Bool = true, textLayer: Bool = false, ocrCacheDirectory: URL? = nil,
-                progress: ((_ done: Int, _ total: Int) -> Void)? = nil) {
+                progress: ((_ done: Int, _ total: Int) -> Void)? = nil,
+                pageProgress: ((_ done: Int, _ total: Int) -> Void)? = nil) {
         self.vector = vector
         self.textLayer = textLayer
         self.ocrCacheDirectory = ocrCacheDirectory
         self.progress = progress
+        self.pageProgress = pageProgress
     }
 }
 
@@ -55,6 +60,7 @@ public enum PDFRenderer {
                 ctx.endPDFPage()
                 outlinePages[page.number] = OutlinePage(index: index + 1, width: page.width, height: page.height,
                                                         words: pageWords)
+                options.pageProgress?(index + 1, file.pages.count)
             }
             if options.textLayer { setOutline(outline(titles: file.titles, pages: outlinePages), in: ctx) }
         }
@@ -73,7 +79,8 @@ public enum PDFRenderer {
 
         return try makePDF { ctx in
             var outlinePages: [Int: OutlinePage] = [:]
-            for number in 1...max(pageCount, 1) {
+            let outputCount = max(pageCount, 1)
+            for number in 1...outputCount {
                 let mark = marksByNumber[number]
                 let deviceW = mark?.width ?? file.deviceWidth
                 let deviceH = mark?.height ?? file.deviceHeight
@@ -121,6 +128,7 @@ public enum PDFRenderer {
                     drawNotice("Original PDF not found or not readable: \(companionName)", in: ctx, box: box)
                 }
                 ctx.endPDFPage()
+                options.pageProgress?(number, outputCount)
             }
             if options.textLayer { setOutline(outline(titles: file.titles, pages: outlinePages), in: ctx) }
         }

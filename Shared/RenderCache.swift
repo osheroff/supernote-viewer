@@ -103,11 +103,15 @@ enum RenderCache {
         progress.showAfterDelay(1)
         defer { progress.close() }
 
-        let options = RenderOptions(vector: true, textLayer: true, ocrCacheDirectory: ocrDirectory) { done, total in
-            Task { @MainActor in
-                progress.update(text: "Recognizing handwriting… \(done)/\(total)", fraction: Double(done) / Double(max(total, 1)))
+        func report(_ text: String) -> (Int, Int) -> Void {
+            { done, total in
+                Task { @MainActor in
+                    progress.update(text: "\(text)… \(done)/\(total)", fraction: Double(done) / Double(max(total, 1)))
+                }
             }
         }
+        let options = RenderOptions(vector: true, textLayer: true, ocrCacheDirectory: ocrDirectory,
+                                    progress: report("Recognizing handwriting"), pageProgress: report("Drawing pages"))
         let data = try await Task.detached(priority: .userInitiated) {
             try PDFRenderer.render(contentsOf: source, options: options)
         }.value

@@ -9,7 +9,9 @@ let package = Package(
         .executable(name: "snrender", targets: ["snrender"]),
     ],
     targets: [
-        .target(name: "SupernoteKit"),
+        // Optimized in debug builds too: the per-pixel loops are ~30× slower unoptimized, which
+        // makes large notebooks take minutes when the apps run from Xcode.
+        .target(name: "SupernoteKit", swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
         .executableTarget(name: "snrender", dependencies: ["SupernoteKit"]),
         .testTarget(name: "SupernoteKitTests", dependencies: ["SupernoteKit"]),
     ]
