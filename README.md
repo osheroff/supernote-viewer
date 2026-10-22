@@ -74,7 +74,7 @@ brew install xcodegen
 ./install.sh
 ```
 
-This builds both apps and installs them to `~/Applications`. The apps are signed ad-hoc, which is fine on your own Mac. To sign with your Apple Development certificate instead, run `DEVELOPMENT_TEAM=<your team ID> ./install.sh`.
+This builds both apps and installs them to `/Applications`, replacing a copy installed from the DMG. The apps are signed ad-hoc, which is fine on your own Mac. To sign with your Apple Development certificate instead, run `DEVELOPMENT_TEAM=<your team ID> ./install.sh`.
 
 `./release.sh` builds the signed and notarized DMG for a GitHub release. The script prints the one-time setup it needs.
 
