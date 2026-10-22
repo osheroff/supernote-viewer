@@ -9,6 +9,8 @@
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleTypeIconFile</key>
+			<string>SupernoteNote</string>
 			<key>CFBundleTypeName</key>
 			<string>Supernote Notebook</string>
 			<key>CFBundleTypeRole</key>
@@ -21,6 +23,8 @@
 			</array>
 		</dict>
 		<dict>
+			<key>CFBundleTypeIconFile</key>
+			<string>SupernoteMark</string>
 			<key>CFBundleTypeName</key>
 			<string>Supernote PDF Annotations</string>
 			<key>CFBundleTypeRole</key>
@@ -95,6 +99,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Supernote Notebook</string>
+			<key>UTTypeIconFile</key>
+			<string>SupernoteNote</string>
 			<key>UTTypeIdentifier</key>
 			<string>dev.schaefer.supernote.note</string>
 			<key>UTTypeTagSpecification</key>
@@ -113,6 +119,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Supernote PDF Annotations</string>
+			<key>UTTypeIconFile</key>
+			<string>SupernoteMark</string>
 			<key>UTTypeIdentifier</key>
 			<string>dev.schaefer.supernote.mark</string>
 			<key>UTTypeTagSpecification</key>

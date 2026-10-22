@@ -30,9 +30,12 @@
 
   /* Text sits on the ruled lines: each block's line-height is a multiple of the ruling. */
   .copy { position: absolute; left: 72px; top: 89px; width: 560px; }
+  /* App icon beside the title; app-icon.png comes from Artwork/app-icon.swift (512 px, ~10% transparent margin). */
+  .head { display: flex; align-items: flex-start; gap: 22px; margin-bottom: 24px; }
+  .head img { width: 199px; height: 199px; margin: -28px -20px -11px -20px; flex: none; }
   h1 {
-    font-size: 82px; font-weight: 800; letter-spacing: -0.035em;
-    line-height: 80px; margin-bottom: 24px;
+    font-size: 74px; font-weight: 800; letter-spacing: -0.035em;
+    line-height: 80px;
   }
   .pitch {
     font-size: 27px; font-weight: 500; line-height: 40px; color: var(--ink);
@@ -76,7 +79,7 @@
 </head>
 <body>
   <div class="copy">
-    <h1>Supernote Viewer</h1>
+    <div class="head"><img src="app-icon.png" alt=""><h1>Supernote Viewer</h1></div>
     <p class="pitch">Open your Supernote notebooks and marked-up PDFs right on your Mac.</p>
     <ul>
       <li><svg viewBox="0 0 22 22"><path d="M3 12.5 Q6 14 8.5 18 Q12 8 20 3.5" fill="none" stroke="#151515" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Press Space in Finder for a Quick Look preview</li>

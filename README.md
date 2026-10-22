@@ -91,6 +91,8 @@ This builds both apps and installs them to `/Applications`, replacing a copy ins
 - `Viewer/`: Supernote Viewer. Its PDFKit window has thumbnails, live reload and measuring. It exports the `.note` and `.mark` file types.
 - `Bridge/`: Supernote Preview Bridge. It hands rendered PDFs to Preview. It imports the file types, so it works on its own.
 - `project.yml`: the XcodeGen spec. The `.xcodeproj` is generated from it.
+- `Viewer/AppIcon.icon`, `Bridge/AppIcon.icon`: the app icons, made for Icon Composer (layers, glass, light-only appearance). Xcode builds the macOS 13–15 images from them.
+- `Artwork/`: icon sources. `render.sh` regenerates the icon layers and the `.note`/`.mark` document icons (`Shared/*.icns`) from `artwork.py`. `release.sh` uses `app-icon.swift` for the DMG volume icon, and the README banner uses it too.
 - `docs/hero/`: source of the README banner (`render.sh` regenerates it).
 
 ### Debugging

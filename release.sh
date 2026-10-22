@@ -50,15 +50,29 @@ for app in "${APPS[@]}"; do
 done
 
 echo "==> Packing $DMG"
-STAGING=$(mktemp -d)
-trap 'rm -rf "$STAGING"' EXIT
+WORK=$(mktemp -d)
+trap 'hdiutil detach "$WORK/mnt" -quiet 2>/dev/null || true; rm -rf "$WORK"' EXIT
+STAGING="$WORK/staging"
+mkdir "$STAGING"
 for app in "${APPS[@]}"; do
   ditto "$PRODUCTS/$app.app" "$STAGING/$app.app"
 done
 ln -s /Applications "$STAGING/Applications"
+# The mounted volume shows the Viewer's app icon: .VolumeIcon.icns plus the custom-icon flag on the root.
+swift Artwork/app-icon.swift "$PRODUCTS/${APPS[1]}.app" "$STAGING/.VolumeIcon.icns"
 mkdir -p dist
 rm -f "$DMG"
-hdiutil create -volname "Supernote Viewer $VERSION" -srcfolder "$STAGING" -format UDZO -quiet "$DMG"
+hdiutil create -volname "Supernote Viewer $VERSION" -srcfolder "$STAGING" -format UDRW -quiet "$WORK/rw.dmg"
+hdiutil attach "$WORK/rw.dmg" -mountpoint "$WORK/mnt" -nobrowse -noautoopen -quiet
+SetFile -a C "$WORK/mnt"
+hdiutil detach "$WORK/mnt" -quiet
+hdiutil convert "$WORK/rw.dmg" -format UDZO -quiet -o "$DMG"
+# Xcode registers the build products with Launch Services; left registered, a stale copy can become the
+# default app for .note/.mark (and supply their document icons) once build/ReleaseData is rebuilt or removed.
+for app in "${APPS[@]}"; do
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+    -u "$PRODUCTS/$app.app" 2>/dev/null || true
+done
 codesign --sign "$IDENTITY" --timestamp "$DMG"
 
 echo "==> Notarizing (usually a few minutes)"
