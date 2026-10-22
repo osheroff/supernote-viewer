@@ -19,6 +19,14 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         RenderCache.cleanCache()
+        #if DEBUG
+        // Development: running from Xcode with a .note/.mark path as launch argument (see the scheme
+        // in project.yml) opens it freshly rendered, so renderer changes show without installing.
+        let files = ProcessInfo.processInfo.arguments.dropFirst().map { URL(fileURLWithPath: $0) }
+            .filter { ["note", "mark"].contains($0.pathExtension.lowercased())
+                      && FileManager.default.fileExists(atPath: $0.path) }
+        if !files.isEmpty { open(files, forceRender: true) }
+        #endif
         // Files arrive via application(_:open:) right after launch; without any, show the info window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
             if !receivedFiles { showInfoWindow() }
@@ -26,13 +34,17 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     func application(_ sender: NSApplication, open urls: [URL]) {
+        open(urls, forceRender: false)
+    }
+
+    private func open(_ urls: [URL], forceRender: Bool) {
         receivedFiles = true
         pendingJobs += 1
         Task { @MainActor in
             var pdfs: [URL] = []
             for url in urls {
                 do {
-                    pdfs.append(try await RenderCache.preparePDF(for: url))
+                    pdfs.append(try await RenderCache.preparePDF(for: url, forceRender: forceRender))
                 } catch {
                     RenderCache.showError(error, for: url)
                 }

@@ -112,6 +112,11 @@ targets:
     dependencies:
       - package: SupernoteKit
         product: SupernoteKit
+    # Debug builds open a .note/.mark passed as launch argument, freshly rendered. Tick it in
+    # Edit Scheme → Run → Arguments (or add your own path) to test renderer changes in Preview.
+    scheme:
+      commandLineArguments:
+        "\"$(PROJECT_DIR)/examples/Example Titles.note\"": false
 
   QuickLookPreview:
     type: app-extension

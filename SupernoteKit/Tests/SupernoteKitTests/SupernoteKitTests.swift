@@ -205,6 +205,16 @@ final class ExampleFileTests: XCTestCase {
         XCTAssertGreaterThan(dark, total / 50, "no text drawn")
         XCTAssertLessThan(dark, total / 3, "text box drawn as a bar")
     }
+
+    /// Drawing reports each output page, so slow renders show progress after recognition.
+    func testReportsPageProgress() throws {
+        for url in [textBoxURL, markURL] {
+            var calls: [[Int]] = []
+            let data = try PDFRenderer.render(contentsOf: url, options: RenderOptions(pageProgress: { calls.append([$0, $1]) }))
+            let count = try XCTUnwrap(CGPDFDocument(CGDataProvider(data: data as CFData)!)).numberOfPages
+            XCTAssertEqual(calls, (1...count).map { [$0, count] }, url.lastPathComponent)
+        }
+    }
 }
 
 func assertVectorStrokesReproduceBitmaps(_ url: URL, file: StaticString = #filePath, line: UInt = #line) throws {

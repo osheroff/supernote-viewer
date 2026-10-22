@@ -20,7 +20,7 @@ You pick which one opens your files on double-click. Both come with Quick Look.
 
 ### Opens in Preview, with searchable handwriting
 
-Double-click a notebook and it opens in Apple's Preview. Handwriting is drawn as vector strokes from the notebook's own pen data, so it stays crisp at any zoom. Apple's on-device text recognition adds an invisible text layer (English and German), so you can search with ⌘F and select and copy your handwriting. Typed text boxes and marker highlights come through as well.
+Double-click a notebook and it opens in Apple's Preview. Handwriting is drawn as vector strokes from the notebook's own pen data, so it stays crisp at any zoom. Apple's on-device text recognition adds an invisible text layer (English and German), so you can search with ⌘F and select and copy your handwriting. Typed text boxes and marker highlights come through as well. Titles you mark on the Supernote become the PDF's table of contents (View → Table of Contents), so you can jump between sections.
 
 <p align="center"><img src="docs/images/preview.jpg" alt="A Supernote notebook opened in Preview" width="520"></p>
 
@@ -63,7 +63,7 @@ Preview Bridge opens a generated PDF from `~/Library/Caches/dev.schaefer.Superno
 
 Tested with Supernote **Manta** files (format `SN_FILE_VER_20260016`, Chauvet 3.28.42). Other models (Nomad, A5 X, A6 X2) use the same format family and will probably work, but they're untested. If a file from your device doesn't render correctly, please [open an issue](https://github.com/schaefer-dev/supernote-viewer/issues) and, if you can, attach a sample file.
 
-Handwriting recognition is only as good as Apple Vision is on quick handwriting, so expect some misread words in search.
+Handwriting recognition is only as good as Apple Vision is on quick handwriting, so expect some misread words in search and in the table of contents.
 
 ## Build from source
 
@@ -85,13 +85,20 @@ This builds both apps and installs them to `~/Applications`. The apps are signed
 
 - `SupernoteKit/`: Swift package with the file parser, RLE decoder, layer compositor, stroke (`TOTALPATH`) parser, vector renderer, handwriting text layer and PDF renderer.
   - `swift test` runs the tests. Tests that use the files in `examples/` always run. Tests that need private sample files in `example_files/` are skipped when those files are missing.
-  - `swift run -c release snrender <file> out.pdf [--png outdir] [--dpi n] [--bitmap] [--ocr]` renders a file from the command line.
+  - `swift run -c release snrender <file> out.pdf [--png outdir] [--dpi n] [--bitmap] [--ocr]` renders a file from the command line. With `--ocr` it also prints the text layer and the table of contents.
 - `QuickLookPreview/`: the Quick Look extension. It is data-based and returns a PDF built by `PDFRenderer`.
 - `Shared/`: the render cache used by both apps.
 - `Viewer/`: Supernote Viewer. Its PDFKit window has thumbnails, live reload and measuring. It exports the `.note` and `.mark` file types.
 - `Bridge/`: Supernote Preview Bridge. It hands rendered PDFs to Preview. It imports the file types, so it works on its own.
 - `project.yml`: the XcodeGen spec. The `.xcodeproj` is generated from it.
 - `docs/hero/`: source of the README banner (`render.sh` regenerates it).
+
+### Debugging
+
+- Renderer changes: `snrender` always renders fresh and leaves the apps' cache alone, e.g. from `SupernoteKit/`: `swift run snrender "../examples/Example Titles.note" /tmp/out.pdf --ocr && open /tmp/out.pdf`.
+- The Bridge from Xcode: in the SupernotePreviewBridge scheme, Edit Scheme → Run → Arguments, tick the example path (or add your own `.note`/`.mark`) and press Run. Debug builds open it freshly rendered in Preview, with breakpoints working and nothing installed or deleted. Release builds ignore the argument.
+- Outside Xcode, `touch file.note` makes the apps render that file again.
+- SupernoteKit is compiled with optimization in Debug builds too (`Package.swift`); unoptimized, large notebooks take minutes.
 
 ### Stroke data (`TOTALPATH`)
 
@@ -102,6 +109,10 @@ Each page's `TOTALPATH` block holds every stroke, including the device's own ren
 - Eraser strokes have color 255.
 
 A per-layer coverage check falls back to the bitmap if the strokes don't account for the layer's ink.
+
+### Titles
+
+The footer lists each title as `TITLE_<page><y><x>` (older files: `TITLE_<page><y>`), pointing to a block with `TITLERECT`, `TITLELEVEL` and a bitmap of the title. The table of contents labels each title with the text layer words inside `TITLERECT`, so it needs no extra recognition pass. Without the text layer (Quick Look) there is no table of contents.
 
 ### Credits
 

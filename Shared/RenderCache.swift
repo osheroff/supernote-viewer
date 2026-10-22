@@ -22,9 +22,9 @@ enum RenderCache {
         var rendererVersion: Int?
     }
 
-    /// Returns an up-to-date PDF for `source`, rendering it if needed.
-    /// Never overwrites a cached PDF the user modified; uses "Name 2.pdf" etc. instead.
-    static func preparePDF(for source: URL) async throws -> URL {
+    /// Returns an up-to-date PDF for `source`, rendering it if needed, or always with `forceRender`
+    /// (used by Debug builds). Never overwrites a cached PDF the user modified; uses "Name 2.pdf" etc. instead.
+    static func preparePDF(for source: URL, forceRender: Bool = false) async throws -> URL {
         let fm = FileManager.default
         let (sourceModified, sourceSize) = try signature(of: source)
 
@@ -43,7 +43,7 @@ enum RenderCache {
                 guard let record = records[name], abs(record.pdfModified - pdfModified) < 1 else {
                     continue  // edited in Preview (or unknown): leave it alone
                 }
-                if record.sourceModified == sourceModified && record.sourceSize == sourceSize
+                if !forceRender && record.sourceModified == sourceModified && record.sourceSize == sourceSize
                     && record.rendererVersion == PDFRenderer.version {
                     return pdfURL
                 }
@@ -103,11 +103,15 @@ enum RenderCache {
         progress.showAfterDelay(1)
         defer { progress.close() }
 
-        let options = RenderOptions(vector: true, textLayer: true, ocrCacheDirectory: ocrDirectory) { done, total in
-            Task { @MainActor in
-                progress.update(text: "Recognizing handwriting… \(done)/\(total)", fraction: Double(done) / Double(max(total, 1)))
+        func report(_ text: String) -> (Int, Int) -> Void {
+            { done, total in
+                Task { @MainActor in
+                    progress.update(text: "\(text)… \(done)/\(total)", fraction: Double(done) / Double(max(total, 1)))
+                }
             }
         }
+        let options = RenderOptions(vector: true, textLayer: true, ocrCacheDirectory: ocrDirectory,
+                                    progress: report("Recognizing handwriting"), pageProgress: report("Drawing pages"))
         let data = try await Task.detached(priority: .userInitiated) {
             try PDFRenderer.render(contentsOf: source, options: options)
         }.value
