@@ -160,7 +160,8 @@ public enum PDFRenderer {
         drawInk(prepareInk(of: page, in: file, options: options), of: page, in: file, ctx: ctx, rect: rect)
     }
 
-    /// decode a page into layers, ready for drawing into a PDF
+    /// Decodes a page's visible layers for `drawInk(_:of:in:ctx:rect:)`, choosing vector or bitmap
+    /// per layer. Doesn't touch a context, so pages can be prepared concurrently.
     static func prepareInk(of page: SNPage, in file: SNFile, options: RenderOptions) -> [PreparedLayer] {
         let strokes = options.vector ? page.strokes(in: file) : nil
 
@@ -228,11 +229,13 @@ public enum PDFRenderer {
         }
     }
 
-    /// launches a bunch of workers,  calling "prepare" concurrently.  A main thread
-    /// then receives the results in serial, calling "body" in turn.
-    private static func pipelined<T>(_ count: Int, prepare: @escaping (Int) -> T,
-                                     _ body: (Int, T) throws -> Void) rethrows {
-        let prepareWorkerCount = max(2, ProcessInfo.processInfo.activeProcessorCount)
+    /// Calls `prepare` for indices `0..<count` on background threads and `body` with each result in
+    /// index order on the calling thread. At most `workers` results are being prepared or waiting
+    /// for `body`, which bounds memory: a prepared page holds its decoded layer bitmaps. More than
+    /// 4 workers don't render faster, since drawing into the PDF on the calling thread is the
+    /// bottleneck, but each one adds a page of bitmaps.
+    static func pipelined<T>(_ count: Int, workers prepareWorkerCount: Int = 4,
+                             prepare: @escaping (Int) -> T, _ body: (Int, T) throws -> Void) rethrows {
         var results = [T?](repeating: nil, count: count)
         let lock = NSLock()
         let ready = (0..<count).map { _ in DispatchSemaphore(value: 0) }
